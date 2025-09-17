@@ -15,7 +15,7 @@ def generate_notulen_with_ai(sentences):
         genai.configure(api_key=api_key)
 
         # Use Gemini model
-        model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
         # Prompt with strict format
         prompt = f"""
@@ -117,11 +117,27 @@ def export_to_word(notulen_text):
 # Streamlit app
 def main():
     st.title("📝 Generator Notulen Rapat Otomatis")
-    st.write("Masukkan transkrip rapat, dan aplikasi akan membuat notulen formal secara otomatis.")
+    st.write("Upload transkrip atau masukkan teks, aplikasi akan membuat notulen formal secara otomatis.")
 
-    # Input area
-    sentences = st.text_area("Masukkan transkrip rapat di sini:", height=300)
+    # Pilihan input
+    option = st.radio("Pilih cara input:", ("📄 Upload File", "⌨️ Tulis Manual"))
 
+    sentences = ""
+
+    if option == "📄 Upload File":
+        uploaded_file = st.file_uploader("Upload file transkrip (txt/docx)", type=["txt", "docx"])
+        if uploaded_file is not None:
+            if uploaded_file.type == "text/plain":
+                sentences = uploaded_file.read().decode("utf-8")
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                doc = Document(uploaded_file)
+                sentences = "\n".join([para.text for para in doc.paragraphs])
+            st.success("✅ Transkrip berhasil dibaca!")
+
+    elif option == "⌨️ Tulis Manual":
+        sentences = st.text_area("Masukkan transkrip rapat di sini:", height=300)
+
+    # Tombol generate
     if st.button("Generate Notulen"):
         if sentences.strip():
             with st.spinner("Sedang membuat notulen..."):
@@ -136,7 +152,7 @@ def main():
                 st.download_button("📥 Download Notulen (Word)", f, file_name="Notulen_Rapat.docx")
 
         else:
-            st.warning("⚠️ Mohon masukkan transkrip rapat terlebih dahulu.")
+            st.warning("⚠️ Mohon masukkan atau upload transkrip rapat terlebih dahulu.")
 
 
 if __name__ == "__main__":
