@@ -2,30 +2,17 @@ import streamlit as st
 import re
 from datetime import datetime
 import io
-import os
 import google.generativeai as genai
 from docx import Document
-from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def process_vtt_text(vtt_text):
-    """
-    Process VTT text exactly like the original Python code
-    """
-    # Clean timestamp & metadata
     cleaned_text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3} --> .*", "", vtt_text)
     cleaned_text = re.sub(r"WEBVTT.*\n", "", cleaned_text)
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
+    sentences = [s.strip() for s in cleaned_text.split(". ") if s.strip()]
 
-    # Split into sentences
-    sentences = cleaned_text.split(". ")
-    sentences = [s.strip() for s in sentences if s.strip()]
-
-    # Take key sentence every 5 sentences (exactly like original)
-    summary = []
-    for i in range(0, len(sentences), 5):
-        if i < len(sentences):
-            summary.append(sentences[i])
+    summary = [sentences[i] for i in range(0, len(sentences), 5) if i < len(sentences)]
 
     return {
         'summary': summary,
@@ -36,26 +23,16 @@ def process_vtt_text(vtt_text):
     }
 
 def generate_notulen(summary):
-    """
-    Generate meeting notes exactly like the original code
-    """
     notulen = "📌 Notulen Rapat\n\n"
     notulen += "Ringkasan:\n" + "\n".join(f"- {s.strip()}" for s in summary if s.strip())
     return notulen
 
-def generate_notulen_with_ai(sentences, api_key):
-    """
-    Generate formal meeting minutes using Google Gemini API
-    Uses the exact prompt provided by the user
-    """
+def generate_notulen_with_ai(sentences):
     try:
-        # Configure API
+        api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
-        
-        # Initialize model
         model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
-        
-        # EXACT PROMPT - DO NOT CHANGE
+
         prompt = f"""
 Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
 
@@ -64,441 +41,132 @@ Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
 FORMAT YANG DIHARAPKAN:
 
 # Notulen Rapat
-
-|Nama Rapat|[isi nama rapat berdasarkan transkrip]|
+|Nama Rapat|[isi nama rapat]|
 |---|---|
-|Hari/Tanggal|[hari, tanggal berdasarkan transkrip]|
-|Waktu|[waktu rapat berdasarkan transkrip]|
-|Tempat|[lokasi rapat berdasarkan transkrip]|
-|Pemimpin Rapat|[nama pemimpin rapat berdasarkan transkrip]|
-|Dibuat oleh|[Group Transformasi Korporasi dan Manajemen Program]|
+|Hari/Tanggal|[...]|
+|Waktu|[...]|
+|Tempat|[...]|
+|Pemimpin Rapat|[...]|
+|Dibuat oleh|Group Transformasi Korporasi dan Manajemen Program|
 
 **Agenda:**
-- [daftar agenda rapat berdasarkan transkrip]
+- [...]
 
 **Peserta Rapat:**
 |No||Nama/Jabatan|
 |---|---|---|
-|1|[nama dan jabatan peserta 1]|
-|2|[nama dan jabatan peserta 2]|
-|[dan seterusnya]|
+|1|[...]|
+|2|[...]|
 
 |Poin Diskusi dan Arahan|Penanggung Jawab|
 |---|---|
-|[Topik diskusi 1]||
-|Kesimpulan :||
-|• [kesimpulan point 1]|[penanggung jawab]|
-|[Topik diskusi 2]||
-|Kesimpulan :||
-|• [kesimpulan point 2]|[penanggung jawab]|
-|[dan seterusnya untuk semua topik]|
+|[...]||
 
 **Disclaimer:**
 _Jika tidak ada tanggapan dalam tiga hari sejak dokumen ini didistribusikan, maka dokumen ini dianggap final._
-
-INSTRUKSI KHUSUS:
-1. Gunakan format tabel persis seperti contoh di atas
-2. Ekstrak semua informasi dari transkrip yang diberikan
-3. Untuk kolom "Penanggung Jawab", identifikasi pihak yang bertanggung jawab berdasarkan diskusi
-4. Gunakan bahasa Indonesia yang formal dan profesional
-5. Jika informasi tidak tersedia dalam transkrip, gunakan [Tidak disebutkan dalam transkrip]
-6. Jangan tambahkan elemen format lain selain yang ditentukan
-
-Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
-        
-        # Generate content with specific configuration
-        generation_config = {
+        response = model.generate_content(prompt, generation_config={
             "temperature": 0.3,
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 2048,
-        }
-        
-        response = model.generate_content(prompt, generation_config=generation_config)
-        
+        })
+
         if response and response.text:
-            # Clean up the response to ensure proper table formatting
             cleaned_response = response.text.strip()
-            
-            # Ensure the response starts with the correct header
             if not cleaned_response.startswith("# Notulen Rapat"):
-                # Try to find the start of the actual content
                 lines = cleaned_response.split('\n')
                 for i, line in enumerate(lines):
                     if "Notulen Rapat" in line:
                         cleaned_response = '\n'.join(lines[i:])
                         break
-            
-            return {
-                'success': True,
-                'content': cleaned_response,
-                'error': None
-            }
+            return {'success': True, 'content': cleaned_response, 'error': None}
         else:
-            return {
-                'success': False,
-                'content': None,
-                'error': 'Empty response from model'
-            }
-            
+            return {'success': False, 'content': None, 'error': 'Empty response'}
     except Exception as e:
-        return {
-            'success': False,
-            'content': None,
-            'error': str(e)
-        }
+        return {'success': False, 'content': None, 'error': str(e)}
 
-def create_word_document(content, filename):
-    """
-    Create a Word document from the generated content
-    """
+def create_word_document(content):
     try:
         doc = Document()
-        
-        # Add title
         title = doc.add_heading('Notulen Rapat', level=1)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Process the content line by line to handle markdown tables
+
         lines = content.split('\n')
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            
             if line.startswith('|') and line.endswith('|'):
-                # This is a table row
                 table_data = []
-                # Collect all table rows
                 while i < len(lines) and lines[i].strip().startswith('|') and lines[i].strip().endswith('|'):
                     row = [cell.strip() for cell in lines[i].split('|') if cell.strip()]
                     table_data.append(row)
                     i += 1
-                
-                # Create a table
                 if table_data:
                     table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
                     table.style = 'Table Grid'
-                    
-                    for row_idx, row_data in enumerate(table_data):
-                        for col_idx, cell_data in enumerate(row_data):
-                            table.cell(row_idx, col_idx).text = cell_data
+                    for r, row_data in enumerate(table_data):
+                        for c, cell_data in enumerate(row_data):
+                            table.cell(r, c).text = cell_data
             elif line.startswith('**') and line.endswith('**'):
-                # This is a bold heading
-                heading = doc.add_heading(line.replace('**', ''), level=2)
+                doc.add_heading(line.replace('**', ''), level=2)
             elif line.startswith('- '):
-                # This is a list item
                 p = doc.add_paragraph(style='List Bullet')
                 p.add_run(line[2:])
             elif line.startswith('_') and line.endswith('_'):
-                # This is italic text
                 p = doc.add_paragraph()
                 p.add_run(line[1:-1]).italic = True
             else:
-                # Regular paragraph
                 doc.add_paragraph(line)
-            
             i += 1
-        
-        # Save to bytes buffer
+
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
-        
         return buffer
-        
     except Exception as e:
         st.error(f"Error creating Word document: {e}")
         return None
 
 def main():
-    st.set_page_config(
-        page_title="Meeting Transcript Processor",
-        page_icon="📝",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    st.set_page_config(page_title="Meeting Transcript Processor", page_icon="📝", layout="wide")
 
-    # Custom CSS for better styling
-    st.markdown("""
-    <style>
-    .main-header {
-        text-align: center;
-        padding: 1rem 0;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-weight: bold;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .stButton>button {
-        width: 100%;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 5px;
-        padding: 0.5rem 1rem;
-    }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 1rem 0;
-    }
-    table, th, td {
-        border: 1px solid #ddd;
-        padding: 8px;
-    }
-    th {
-        background-color: #f2f2f2;
-        text-align: left;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown('<h1 style="text-align:center">📝 Meeting Transcript Processor</h1>', unsafe_allow_html=True)
+    st.markdown("Upload Zoom transcript (.vtt) → ringkasan otomatis → notulen formal dengan AI")
 
-    # Header
-    st.markdown('<h1 class="main-header">📝 Meeting Transcript Processor</h1>', unsafe_allow_html=True)
-    st.markdown("Transform your Zoom meeting transcripts into concise summaries")
-    
-    # Sidebar with info
-    with st.sidebar:
-        st.header("ℹ️ How to Use")
-        st.markdown("""
-        1. **Upload VTT File**: Select your Zoom transcript file
-        2. **Process**: Click to analyze the transcript
-        3. **Review**: Check the generated summary
-        4. **Download**: Save your meeting notes
-        """)
-        
-        st.header("🤖 AI-Powered Processing")
-        st.markdown("""
-        **Gemini API Integration:**
-        - Formal Indonesian meeting minutes
-        - Professional table formatting
-        - Structured agenda extraction
-        - Participant identification
-        
-        **Enter your Google Gemini API key to enable AI processing**
-        """)
-        
-        # API Key input
-        api_key = st.text_input(
-            "Google Gemini API Key",
-            type="password",
-            help="Get your free API key from https://makersuite.google.com/app/apikey",
-            key="sidebar_api_key"
-        )
-        
-        st.header("🚀 Deploy for Free")
-        st.markdown("""
-        **Hosting Options:**
-        - Streamlit Community Cloud
-        - Hugging Face Spaces
-        - Railway
-        - Render
-        """)
+    uploaded_file = st.file_uploader("Upload VTT Transcript", type=['vtt'])
+    if uploaded_file is not None:
+        content = uploaded_file.getvalue().decode("utf-8")
+        result = process_vtt_text(content)
+        notulen = generate_notulen(result['summary'])
 
-    # Main content
-    tab1, tab2, tab3 = st.tabs(["📁 Upload File", "🤖 AI Processing", "🔗 Zoom URL (Coming Soon)"])
-    
-    with tab1:
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.subheader("Upload VTT Transcript")
-            uploaded_file = st.file_uploader(
-                "Choose a VTT file",
-                type=['vtt'],
-                help="Upload the VTT transcript file from your Zoom recording"
-            )
-            
-            if uploaded_file is not None:
-                st.success(f"File uploaded: {uploaded_file.name} ({uploaded_file.size} bytes)")
-                
-                if st.button("🔄 Process Transcript", type="primary", key="process_btn"):
-                    with st.spinner("Processing transcript..."):
-                        # Read and process the file
-                        content = uploaded_file.getvalue().decode("utf-8")
-                        result = process_vtt_text(content)
-                        
-                        # Store in session state
-                        st.session_state.result = result
-                        st.session_state.notulen = generate_notulen(result['summary'])
-                        st.success("✅ Transcript processed successfully!")
-    
-    with tab2:
-        st.subheader("🤖 AI-Powered Formal Minutes Generation")
-        
-        if 'result' not in st.session_state:
-            st.info("📁 Please upload and process a VTT file first in the 'Upload File' tab")
-        else:
-            # API Key input
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                gemini_api_key = st.text_input(
-                    "Google Gemini API Key",
-                    type="password",
-                    help="Get your free API key from https://makersuite.google.com/app/apikey",
-                    placeholder="AIza...",
-                    key="main_api_key"
-                )
-            
-            with col2:
-                st.markdown("### 🔑 Get Free API Key")
-                st.markdown("[Get Gemini API Key →](https://makersuite.google.com/app/apikey)")
-                st.caption("Free tier: 15 requests/minute")
-            
-            if gemini_api_key:
-                st.success("✅ API Key provided")
-                
-                if st.button("🚀 Generate Formal Meeting Minutes", type="primary", key="ai_btn"):
-                    with st.spinner("🤖 Generating formal notulen with AI..."):
-                        result = st.session_state.result
-                        full_text = result['full_text']
-                        
-                        # Generate AI content
-                        ai_result = generate_notulen_with_ai(full_text, gemini_api_key)
-                        
-                        if ai_result['success']:
-                            st.session_state.ai_notulen = ai_result['content']
-                            st.success("✅ Formal meeting minutes generated successfully!")
-                        else:
-                            st.error(f"❌ Error generating AI content: {ai_result['error']}")
-            else:
-                st.warning("🔑 Please enter your Gemini API key to proceed")
-                st.info("💡 You can get a free API key from Google AI Studio")
+        st.success("✅ Transcript processed successfully!")
+        st.subheader("📋 Basic Summary")
+        st.text_area("Basic Summary", value=notulen, height=250)
 
-    with tab3:
-        st.subheader("🔗 Zoom Recording URL")
-        st.info("This feature requires backend integration and will be available in future updates.")
-        
-        zoom_url = st.text_input("Zoom Recording URL", placeholder="https://zoom.us/rec/share/...")
-        passcode = st.text_input("Passcode (if required)", type="password")
-        st.button("Process URL", disabled=True, help="Coming soon!")
+        if st.button("🚀 Generate Formal Meeting Minutes with AI"):
+            with st.spinner("Generating AI Notulen..."):
+                ai_result = generate_notulen_with_ai(result['full_text'])
+                if ai_result['success']:
+                    st.subheader("🤖 AI-Generated Notulen")
+                    st.markdown(ai_result['content'], unsafe_allow_html=True)
 
-    # Results section - Basic Summary
-    if 'result' in st.session_state and 'notulen' in st.session_state:
-        st.divider()
-        st.subheader("📋 Basic Summary Results")
-        
-        result = st.session_state.result
-        notulen = st.session_state.notulen
-        
-        # Display the basic summary
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.text_area(
-                "Basic Summary (Every 5th Sentence)",
-                value=notulen,
-                height=300,
-                help="Your basic processed meeting summary"
-            )
-        
-        with col2:
-            st.subheader("📥 Download Options")
-            
-            # Prepare download content
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            download_content = f"""Meeting Summary - {timestamp}
-Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.download_button("📄 Download as TXT",
+                        data=ai_result['content'],
+                        file_name=f"Notulen_Rapat_{timestamp}.txt",
+                        mime="text/plain"
+                    )
 
-{notulen}
-
-Statistics:
-- Original sentences: {result['original_length']}
-- Summary points: {result['summary_length']}
-- Compression ratio: {((result['summary_length'] / result['original_length']) * 100):.1f}%
-
-Full processed text:
-{result['full_text'][:500]}{'...' if len(result['full_text']) > 500 else ''}
-"""
-            
-            st.download_button(
-                label="📄 Download as TXT",
-                data=download_content,
-                file_name=f"meeting_summary_{timestamp}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-            
-            # Additional download format
-            csv_content = "Point,Summary\n" + "\n".join([f"{i+1},\"{point}\"" for i, point in enumerate(result['summary'])])
-            st.download_button(
-                label="📊 Download as CSV",
-                data=csv_content,
-                file_name=f"meeting_summary_{timestamp}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            
-            if st.button("🗑️ Clear Basic Results", key="clear_basic"):
-                if 'result' in st.session_state:
-                    del st.session_state.result
-                if 'notulen' in st.session_state:
-                    del st.session_state.notulen
-                st.rerun()
-
-    # AI Results section - Formal Meeting Minutes
-    if 'ai_notulen' in st.session_state:
-        st.divider()
-        st.subheader("🤖 AI-Generated Formal Meeting Minutes")
-        
-        ai_content = st.session_state.ai_notulen
-        
-        # Display AI-generated content
-        st.markdown(ai_content, unsafe_allow_html=True)
-        
-        # Download section
-        st.subheader("📥 Download AI Results")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Prepare download content
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            
-            # Text download
-            st.download_button(
-                label="📄 Download as TXT",
-                data=ai_content,
-                file_name=f"formal_notulen_{timestamp}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-        
-        with col2:
-            # Word document download
-            if st.button("📄 Generate Word Document", use_container_width=True, key="word_btn"):
-                with st.spinner("Creating Word document..."):
-                    word_buffer = create_word_document(ai_content, f"notulen_{timestamp}.docx")
+                    word_buffer = create_word_document(ai_result['content'])
                     if word_buffer:
-                        st.download_button(
-                            label="📄 Download Word Document",
+                        st.download_button("📄 Download as Word",
                             data=word_buffer.getvalue(),
                             file_name=f"Notulen_Rapat_{timestamp}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
-            
-            if st.button("🗑️ Clear AI Results", key="clear_ai"):
-                if 'ai_notulen' in st.session_state:
-                    del st.session_state.ai_notulen
-                st.rerun()
-
-    # Footer
-    st.divider()
-    st.markdown("""
-    <div style='text-align: center; color: #666; padding: 1rem;'>
-        Built with ❤️ using Streamlit | Process Zoom transcripts efficiently
-    </div>
-    """, unsafe_allow_html=True)
+                else:
+                    st.error(f"❌ Error: {ai_result['error']}")
 
 if __name__ == "__main__":
     main()
