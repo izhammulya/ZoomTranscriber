@@ -35,16 +35,23 @@ def process_vtt_text(vtt_text):
         'sentences': sentences
     }
 
+def generate_notulen(summary):
+    """
+    Generate meeting notes exactly like the original code
+    """
+    notulen = "📌 Notulen Rapat\n\n"
+    notulen += "Ringkasan:\n" + "\n".join(f"- {s.strip()}" for s in summary if s.strip())
+    return notulen
 
 def generate_notulen_with_ai(sentences, api_key):
     """
     Generate formal meeting minutes using Google Gemini API
-    Uses the exact prompt provided by the user
+    Uses the exact backend code provided
     """
     try:
         # Configure API
-        api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)   
+        genai.configure(api_key=api_key)
+        
         # Initialize model
         model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
         
@@ -100,28 +107,12 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-        # Generate content with specific configuration
-        generation_config = {
-            "temperature": 0.3,
-            "top_p": 0.8,
-            "top_k": 40,
-            "max_output_tokens": 2048,
-        }
-        
-        response = model.generate_content(prompt, generation_config=generation_config)
+        # Generate content exactly as in the backend code
+        response = model.generate_content(prompt)
         
         if response and response.text:
-            # Clean up the response to ensure proper table formatting
+            # Clean up the response
             cleaned_response = response.text.strip()
-            
-            # Ensure the response starts with the correct header
-            if not cleaned_response.startswith("# Notulen Rapat"):
-                # Try to find the start of the actual content
-                lines = cleaned_response.split('\n')
-                for i, line in enumerate(lines):
-                    if "Notulen Rapat" in line:
-                        cleaned_response = '\n'.join(lines[i:])
-                        break
             
             return {
                 'success': True,
@@ -148,50 +139,11 @@ def create_word_document(content, filename):
     """
     try:
         doc = Document()
-        
-        # Add title
         title = doc.add_heading('Notulen Rapat', level=1)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Process the content line by line to handle markdown tables
-        lines = content.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            
-            if line.startswith('|') and line.endswith('|'):
-                # This is a table row
-                table_data = []
-                # Collect all table rows
-                while i < len(lines) and lines[i].strip().startswith('|') and lines[i].strip().endswith('|'):
-                    row = [cell.strip() for cell in lines[i].split('|') if cell.strip()]
-                    table_data.append(row)
-                    i += 1
-                
-                # Create a table
-                if table_data:
-                    table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
-                    table.style = 'Table Grid'
-                    
-                    for row_idx, row_data in enumerate(table_data):
-                        for col_idx, cell_data in enumerate(row_data):
-                            table.cell(row_idx, col_idx).text = cell_data
-            elif line.startswith('**') and line.endswith('**'):
-                # This is a bold heading
-                heading = doc.add_heading(line.replace('**', ''), level=2)
-            elif line.startswith('- '):
-                # This is a list item
-                p = doc.add_paragraph(style='List Bullet')
-                p.add_run(line[2:])
-            elif line.startswith('_') and line.endswith('_'):
-                # This is italic text
-                p = doc.add_paragraph()
-                p.add_run(line[1:-1]).italic = True
-            else:
-                # Regular paragraph
-                doc.add_paragraph(line)
-            
-            i += 1
+        # Add the content as plain text
+        doc.add_paragraph(content)
         
         # Save to bytes buffer
         buffer = io.BytesIO()
