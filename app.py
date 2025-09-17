@@ -307,7 +307,7 @@ def main():
         st.markdown("### 📋 Generated Notulen")
         
         # Success message
-        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong>Silahkan review hasilnya.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong>  Silahkan review hasilnya.</div>', unsafe_allow_html=True)
         
         # Display the content
         st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
