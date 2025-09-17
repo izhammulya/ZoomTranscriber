@@ -35,13 +35,6 @@ def process_vtt_text(vtt_text):
         'sentences': sentences
     }
 
-def generate_notulen(summary):
-    """
-    Generate meeting notes exactly like the original code
-    """
-    notulen = "📌 Notulen Rapat\n\n"
-    notulen += "Ringkasan:\n" + "\n".join(f"- {s.strip()}" for s in summary if s.strip())
-    return notulen
 
 def generate_notulen_with_ai(sentences, api_key):
     """
@@ -51,8 +44,7 @@ def generate_notulen_with_ai(sentences, api_key):
     try:
         # Configure API
         api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)
-        
+        genai.configure(api_key=api_key)   
         # Initialize model
         model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
         
