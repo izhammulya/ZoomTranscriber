@@ -148,7 +148,7 @@ def create_word_document(content, filename):
 
 def main():
     st.set_page_config(
-        page_title="AI Meeting Minutes Generator",
+        page_title="Notulen Zoom Meeting Generator by TKMP",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -214,8 +214,8 @@ def main():
     """, unsafe_allow_html=True)
 
     # Header
-    st.markdown('<h1 class="main-header">📝 AI Meeting Minutes Generator</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Transform your Zoom meeting transcripts into professional meeting minutes</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">📝 Notulen Zoom Meeting Generator by TKMP</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Generate Notulen dengan praktis no ribet </p>', unsafe_allow_html=True)
     
     # Get API key from secrets.toml
     try:
@@ -245,27 +245,25 @@ def main():
         
         st.header("📋 How to Use")
         st.markdown("""
-        1. **Upload** your Zoom VTT transcript file
-        2. **Process** the transcript using AI
-        3. **Review** the generated meeting minutes
-        4. **Download** in your preferred format
+        1. **Upload** transkrip Zoom Anda
+        2. **Process** transkrip nya by button
+        3. **Review** Notulen yang sudah jadi
         """)
         
-        st.header("📊 Features")
+        st.header("📊 Kelebihannya cuy")
         st.markdown("""
-        - ✅ Professional table formatting
-        - ✅ Agenda extraction
-        - ✅ Participant identification
-        - ✅ Action items tracking
-        - ✅ Formal Indonesian language
-        - ✅ Multiple download formats
+        - ✅ Sudah disesuaikan dengan format notulen
+        - ✅ Ekstraksi agenda
+        - ✅ Mengidentifikasi peserta (speaker)
+        - ✅ Menggunakan bahasa Indonesia yang baik
+        - ✅ Downloadable
         """)
 
     # Main content
-    st.markdown("### 📁 Upload Your Meeting Transcript")
+    st.markdown("### 📁 Upload Transkripmu disini")
     
     uploaded_file = st.file_uploader(
-        "Choose a VTT file from your Zoom recording",
+        "Pilih File",
         type=['vtt'],
         help="Supported format: .vtt (Zoom transcript files)"
     )
@@ -279,7 +277,7 @@ def main():
             st.info(f"**File size:** {uploaded_file.size:,} bytes")
         
         # Process button
-        if st.button("🚀 Generate Meeting Minutes", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Notulen", type="primary", use_container_width=True):
             if not api_key_available:
                 st.error("Please configure your API key in secrets.toml first")
                 return
@@ -306,10 +304,10 @@ def main():
     # Display results
     if 'ai_notulen' in st.session_state and st.session_state.get('processed', False):
         st.divider()
-        st.markdown("### 📋 Generated Meeting Minutes")
+        st.markdown("### 📋 Generated Notulen")
         
         # Success message
-        st.markdown('<div class="success-box">✅ <strong>Meeting minutes successfully generated!</strong> You can now review and download the results.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong>Silahkan review hasilnya.</div>', unsafe_allow_html=True)
         
         # Display the content
         st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
@@ -356,8 +354,8 @@ def main():
     st.divider()
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p>Built with ❤️ using Streamlit & Google Gemini AI</p>
-        <p>Transform your meeting transcripts into professional documentation</p>
+        <p>Di buat dengan penuh ❤️</p>
+        <p>Summary rapat Anda disini</p>
     </div>
     """, unsafe_allow_html=True)
 
