@@ -48,11 +48,11 @@ def generate_notulen_with_ai(sentences, api_key):
     Generate formal meeting minutes using Google Gemini API
     Uses the exact prompt provided by the user
     """
-    try:
-        # Configure API
+   try:
+        # ambil API key langsung dari secrets.toml
+        api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
-        
-        # Initialize model
+
         model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
         
         # EXACT PROMPT - DO NOT CHANGE
