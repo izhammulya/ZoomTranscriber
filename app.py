@@ -50,6 +50,7 @@ def generate_notulen_with_ai(sentences, api_key):
     """
     try:
         # Configure API
+        api_key = st.secrets["api_key"]
         genai.configure(api_key=api_key)
         
         # Initialize model
