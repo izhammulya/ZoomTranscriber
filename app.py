@@ -296,7 +296,7 @@ def main():
                     if ai_result['success']:
                         st.session_state.ai_notulen = ai_result['content']
                         st.session_state.processed = True
-                        st.success("✅ Meeting minutes generated successfully!")
+                        st.success("✅ Generate Notulen berhasil & sukses !")
                     else:
                         st.error(f"❌ Error: {ai_result['error']}")
                         
