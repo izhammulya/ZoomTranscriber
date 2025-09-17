@@ -1,2 +1,2 @@
 # ZoomTranscriber
-Getting Summary from zoom recording
+Generate Notulen from zoom recording
