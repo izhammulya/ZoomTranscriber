@@ -2,7 +2,6 @@ import streamlit as st
 import re
 from datetime import datetime
 import io
-import os
 import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt
@@ -10,38 +9,13 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def process_vtt_text(vtt_text):
     """
-    Process VTT text exactly like the original Python code
+    Process VTT text to clean timestamps and metadata
     """
     # Clean timestamp & metadata
     cleaned_text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3} --> .*", "", vtt_text)
     cleaned_text = re.sub(r"WEBVTT.*\n", "", cleaned_text)
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
-
-    # Split into sentences
-    sentences = cleaned_text.split(". ")
-    sentences = [s.strip() for s in sentences if s.strip()]
-
-    # Take key sentence every 5 sentences (exactly like original)
-    summary = []
-    for i in range(0, len(sentences), 5):
-        if i < len(sentences):
-            summary.append(sentences[i])
-
-    return {
-        'summary': summary,
-        'full_text': cleaned_text,
-        'original_length': len(sentences),
-        'summary_length': len(summary),
-        'sentences': sentences
-    }
-
-def generate_notulen(summary):
-    """
-    Generate meeting notes exactly like the original code
-    """
-    notulen = "📌 Notulen Rapat\n\n"
-    notulen += "Ringkasan:\n" + "\n".join(f"- {s.strip()}" for s in summary if s.strip())
-    return notulen
+    return cleaned_text
 
 def generate_notulen_with_ai(sentences, api_key):
     """
@@ -50,7 +24,6 @@ def generate_notulen_with_ai(sentences, api_key):
     """
     try:
         # Configure API
-        api_key = st.secrets["api_key"]
         genai.configure(api_key=api_key)
         
         # Initialize model
@@ -156,50 +129,11 @@ def create_word_document(content, filename):
     """
     try:
         doc = Document()
-        
-        # Add title
         title = doc.add_heading('Notulen Rapat', level=1)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Process the content line by line to handle markdown tables
-        lines = content.split('\n')
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            
-            if line.startswith('|') and line.endswith('|'):
-                # This is a table row
-                table_data = []
-                # Collect all table rows
-                while i < len(lines) and lines[i].strip().startswith('|') and lines[i].strip().endswith('|'):
-                    row = [cell.strip() for cell in lines[i].split('|') if cell.strip()]
-                    table_data.append(row)
-                    i += 1
-                
-                # Create a table
-                if table_data:
-                    table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
-                    table.style = 'Table Grid'
-                    
-                    for row_idx, row_data in enumerate(table_data):
-                        for col_idx, cell_data in enumerate(row_data):
-                            table.cell(row_idx, col_idx).text = cell_data
-            elif line.startswith('**') and line.endswith('**'):
-                # This is a bold heading
-                heading = doc.add_heading(line.replace('**', ''), level=2)
-            elif line.startswith('- '):
-                # This is a list item
-                p = doc.add_paragraph(style='List Bullet')
-                p.add_run(line[2:])
-            elif line.startswith('_') and line.endswith('_'):
-                # This is italic text
-                p = doc.add_paragraph()
-                p.add_run(line[1:-1]).italic = True
-            else:
-                # Regular paragraph
-                doc.add_paragraph(line)
-            
-            i += 1
+        # Add the content as plain text
+        doc.add_paragraph(content)
         
         # Save to bytes buffer
         buffer = io.BytesIO()
@@ -214,7 +148,7 @@ def create_word_document(content, filename):
 
 def main():
     st.set_page_config(
-        page_title="Meeting Transcript Processor",
+        page_title="AI Meeting Minutes Generator",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -225,279 +159,205 @@ def main():
     <style>
     .main-header {
         text-align: center;
-        padding: 1rem 0;
+        padding: 2rem 0;
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+        font-size: 2.5rem;
         font-weight: bold;
+        margin-bottom: 1rem;
     }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
+    .sub-header {
         text-align: center;
-        margin: 0.5rem 0;
+        color: #666;
+        margin-bottom: 2rem;
+    }
+    .upload-container {
+        background: #f8f9fa;
+        padding: 2rem;
+        border-radius: 10px;
+        border: 2px dashed #ddd;
+        text-align: center;
+        margin-bottom: 2rem;
     }
     .stButton>button {
-        width: 100%;
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        border-radius: 5px;
-        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        padding: 0.75rem 1.5rem;
+        font-weight: 600;
     }
-    table {
-        width: 100%;
-        border-collapse: collapse;
+    .stButton>button:hover {
+        background: linear-gradient(90deg, #5a6fd8 0%, #6a4190 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .success-box {
+        background: #d4edda;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #c3e6cb;
         margin: 1rem 0;
     }
-    table, th, td {
-        border: 1px solid #ddd;
-        padding: 8px;
-    }
-    th {
-        background-color: #f2f2f2;
-        text-align: left;
+    .error-box {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #f5c6cb;
+        margin: 1rem 0;
     }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
-    st.markdown('<h1 class="main-header">📝 Meeting Transcript Processor</h1>', unsafe_allow_html=True)
-    st.markdown("Transform your Zoom meeting transcripts into concise summaries")
+    st.markdown('<h1 class="main-header">📝 AI Meeting Minutes Generator</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Transform your Zoom meeting transcripts into professional meeting minutes</p>', unsafe_allow_html=True)
     
-    # Sidebar with info
+    # Get API key from secrets.toml
+    try:
+        api_key = st.secrets["api_key"]
+        api_key_available = True
+    except (KeyError, FileNotFoundError):
+        api_key = None
+        api_key_available = False
+    
+    # Sidebar
     with st.sidebar:
-        st.header("ℹ️ How to Use")
+        st.header("⚙️ Configuration")
+        
+        if api_key_available:
+            st.success("✅ API Key loaded successfully")
+        else:
+            st.error("❌ API Key not found")
+            st.info("""
+            **Setup Instructions:**
+            1. Create `.streamlit/secrets.toml`
+            2. Add your API key:
+            ```
+            api_key = "your_api_key_here"
+            ```
+            3. Get API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+            """)
+        
+        st.header("📋 How to Use")
         st.markdown("""
-        1. **Upload VTT File**: Select your Zoom transcript file
-        2. **Process**: Click to analyze the transcript
-        3. **Review**: Check the generated summary
-        4. **Download**: Save your meeting notes
+        1. **Upload** your Zoom VTT transcript file
+        2. **Process** the transcript using AI
+        3. **Review** the generated meeting minutes
+        4. **Download** in your preferred format
         """)
         
-        st.header("🤖 AI-Powered Processing")
+        st.header("📊 Features")
         st.markdown("""
-        **Gemini API Integration:**
-        - Formal Indonesian meeting minutes
-        - Professional table formatting
-        - Structured agenda extraction
-        - Participant identification
-        
-        **Enter your Google Gemini API key to enable AI processing**
-        """)
-        
-        # API Key input
-        api_key = st.text_input(
-            "Google Gemini API Key",
-            type="password",
-            help="Get your free API key from https://makersuite.google.com/app/apikey",
-            key="sidebar_api_key"
-        )
-        
-        st.header("🚀 Deploy for Free")
-        st.markdown("""
-        **Hosting Options:**
-        - Streamlit Community Cloud
-        - Hugging Face Spaces
-        - Railway
-        - Render
+        - ✅ Professional table formatting
+        - ✅ Agenda extraction
+        - ✅ Participant identification
+        - ✅ Action items tracking
+        - ✅ Formal Indonesian language
+        - ✅ Multiple download formats
         """)
 
     # Main content
-    tab1, tab2, tab3 = st.tabs(["📁 Upload File", "🤖 AI Processing", "🔗 Zoom URL (Coming Soon)"])
+    st.markdown("### 📁 Upload Your Meeting Transcript")
     
-    with tab1:
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.subheader("Upload VTT Transcript")
-            uploaded_file = st.file_uploader(
-                "Choose a VTT file",
-                type=['vtt'],
-                help="Upload the VTT transcript file from your Zoom recording"
-            )
-            
-            if uploaded_file is not None:
-                st.success(f"File uploaded: {uploaded_file.name} ({uploaded_file.size} bytes)")
-                
-                if st.button("🔄 Process Transcript", type="primary", key="process_btn"):
-                    with st.spinner("Processing transcript..."):
-                        # Read and process the file
-                        content = uploaded_file.getvalue().decode("utf-8")
-                        result = process_vtt_text(content)
-                        
-                        # Store in session state
-                        st.session_state.result = result
-                        st.session_state.notulen = generate_notulen(result['summary'])
-                        st.success("✅ Transcript processed successfully!")
+    uploaded_file = st.file_uploader(
+        "Choose a VTT file from your Zoom recording",
+        type=['vtt'],
+        help="Supported format: .vtt (Zoom transcript files)"
+    )
     
-    with tab2:
-        st.subheader("🤖 AI-Powered Formal Minutes Generation")
-        
-        if 'result' not in st.session_state:
-            st.info("📁 Please upload and process a VTT file first in the 'Upload File' tab")
-        else:
-            # API Key input
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                gemini_api_key = st.text_input(
-                    "Google Gemini API Key",
-                    type="password",
-                    help="Get your free API key from https://makersuite.google.com/app/apikey",
-                    placeholder="AIza...",
-                    key="main_api_key"
-                )
-            
-            with col2:
-                st.markdown("### 🔑 Get Free API Key")
-                st.markdown("[Get Gemini API Key →](https://makersuite.google.com/app/apikey)")
-                st.caption("Free tier: 15 requests/minute")
-            
-            if gemini_api_key:
-                st.success("✅ API Key provided")
-                
-                if st.button("🚀 Generate Formal Meeting Minutes", type="primary", key="ai_btn"):
-                    with st.spinner("🤖 Generating formal notulen with AI..."):
-                        result = st.session_state.result
-                        full_text = result['full_text']
-                        
-                        # Generate AI content
-                        ai_result = generate_notulen_with_ai(full_text, gemini_api_key)
-                        
-                        if ai_result['success']:
-                            st.session_state.ai_notulen = ai_result['content']
-                            st.success("✅ Formal meeting minutes generated successfully!")
-                        else:
-                            st.error(f"❌ Error generating AI content: {ai_result['error']}")
-            else:
-                st.warning("🔑 Please enter your Gemini API key to proceed")
-                st.info("💡 You can get a free API key from Google AI Studio")
-
-    with tab3:
-        st.subheader("🔗 Zoom Recording URL")
-        st.info("This feature requires backend integration and will be available in future updates.")
-        
-        zoom_url = st.text_input("Zoom Recording URL", placeholder="https://zoom.us/rec/share/...")
-        passcode = st.text_input("Passcode (if required)", type="password")
-        st.button("Process URL", disabled=True, help="Coming soon!")
-
-    # Results section - Basic Summary
-    if 'result' in st.session_state and 'notulen' in st.session_state:
-        st.divider()
-        st.subheader("📋 Basic Summary Results")
-        
-        result = st.session_state.result
-        notulen = st.session_state.notulen
-        
-        # Display the basic summary
-        col1, col2 = st.columns([2, 1])
-        
+    if uploaded_file is not None:
+        # File info
+        col1, col2 = st.columns(2)
         with col1:
-            st.text_area(
-                "Basic Summary (Every 5th Sentence)",
-                value=notulen,
-                height=300,
-                help="Your basic processed meeting summary"
-            )
-        
+            st.info(f"**File name:** {uploaded_file.name}")
         with col2:
-            st.subheader("📥 Download Options")
-            
-            # Prepare download content
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            download_content = f"""Meeting Summary - {timestamp}
-Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-{notulen}
-
-Statistics:
-- Original sentences: {result['original_length']}
-- Summary points: {result['summary_length']}
-- Compression ratio: {((result['summary_length'] / result['original_length']) * 100):.1f}%
-
-Full processed text:
-{result['full_text'][:500]}{'...' if len(result['full_text']) > 500 else ''}
-"""
-            
-            st.download_button(
-                label="📄 Download as TXT",
-                data=download_content,
-                file_name=f"meeting_summary_{timestamp}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-            
-            # Additional download format
-            csv_content = "Point,Summary\n" + "\n".join([f"{i+1},\"{point}\"" for i, point in enumerate(result['summary'])])
-            st.download_button(
-                label="📊 Download as CSV",
-                data=csv_content,
-                file_name=f"meeting_summary_{timestamp}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            
-            if st.button("🗑️ Clear Basic Results", key="clear_basic"):
-                if 'result' in st.session_state:
-                    del st.session_state.result
-                if 'notulen' in st.session_state:
-                    del st.session_state.notulen
-                st.rerun()
-
-    # AI Results section - Formal Meeting Minutes
-    if 'ai_notulen' in st.session_state:
+            st.info(f"**File size:** {uploaded_file.size:,} bytes")
+        
+        # Process button
+        if st.button("🚀 Generate Meeting Minutes", type="primary", use_container_width=True):
+            if not api_key_available:
+                st.error("Please configure your API key in secrets.toml first")
+                return
+                
+            with st.spinner("🤖 AI is processing your transcript..."):
+                try:
+                    # Read and process the file
+                    content = uploaded_file.getvalue().decode("utf-8")
+                    cleaned_text = process_vtt_text(content)
+                    
+                    # Generate AI content
+                    ai_result = generate_notulen_with_ai(cleaned_text, api_key)
+                    
+                    if ai_result['success']:
+                        st.session_state.ai_notulen = ai_result['content']
+                        st.session_state.processed = True
+                        st.success("✅ Meeting minutes generated successfully!")
+                    else:
+                        st.error(f"❌ Error: {ai_result['error']}")
+                        
+                except Exception as e:
+                    st.error(f"❌ Processing error: {str(e)}")
+    
+    # Display results
+    if 'ai_notulen' in st.session_state and st.session_state.get('processed', False):
         st.divider()
-        st.subheader("🤖 AI-Generated Formal Meeting Minutes")
+        st.markdown("### 📋 Generated Meeting Minutes")
         
-        ai_content = st.session_state.ai_notulen
+        # Success message
+        st.markdown('<div class="success-box">✅ <strong>Meeting minutes successfully generated!</strong> You can now review and download the results.</div>', unsafe_allow_html=True)
         
-        # Display AI-generated content
-        st.markdown(ai_content, unsafe_allow_html=True)
+        # Display the content
+        st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
         
         # Download section
-        st.subheader("📥 Download AI Results")
+        st.divider()
+        st.markdown("### 📥 Download Options")
+        
         col1, col2 = st.columns(2)
         
         with col1:
-            # Prepare download content
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            
             # Text download
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             st.download_button(
                 label="📄 Download as TXT",
-                data=ai_content,
-                file_name=f"formal_notulen_{timestamp}.txt",
+                data=st.session_state.ai_notulen,
+                file_name=f"meeting_minutes_{timestamp}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
         
         with col2:
             # Word document download
-            if st.button("📄 Generate Word Document", use_container_width=True, key="word_btn"):
-                with st.spinner("Creating Word document..."):
-                    word_buffer = create_word_document(ai_content, f"notulen_{timestamp}.docx")
-                    if word_buffer:
-                        st.download_button(
-                            label="📄 Download Word Document",
-                            data=word_buffer.getvalue(),
-                            file_name=f"Notulen_Rapat_{timestamp}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True
-                        )
-            
-            if st.button("🗑️ Clear AI Results", key="clear_ai"):
-                if 'ai_notulen' in st.session_state:
-                    del st.session_state.ai_notulen
-                st.rerun()
-
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            word_buffer = create_word_document(st.session_state.ai_notulen, f"meeting_minutes_{timestamp}.docx")
+            if word_buffer:
+                st.download_button(
+                    label="📝 Download Word Document",
+                    data=word_buffer.getvalue(),
+                    file_name=f"meeting_minutes_{timestamp}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
+        
+        # Clear results button
+        if st.button("🗑️ Clear Results", use_container_width=True):
+            if 'ai_notulen' in st.session_state:
+                del st.session_state.ai_notulen
+            if 'processed' in st.session_state:
+                del st.session_state.processed
+            st.rerun()
+    
     # Footer
     st.divider()
     st.markdown("""
-    <div style='text-align: center; color: #666; padding: 1rem;'>
-        Built with ❤️ using Streamlit | Process Zoom transcripts efficiently
+    <div style='text-align: center; color: #666; padding: 2rem;'>
+        <p>Built with ❤️ using Streamlit & Google Gemini AI</p>
+        <p>Transform your meeting transcripts into professional documentation</p>
     </div>
     """, unsafe_allow_html=True)
 
