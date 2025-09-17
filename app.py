@@ -60,9 +60,11 @@ FORMAT YANG DIHARAPKAN:
 |Poin Diskusi dan Arahan|Penanggung Jawab|
 |---|---|
 |[Topik diskusi 1]||
+[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 1]|[penanggung jawab]|
 |[Topik diskusi 2]||
+[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 2]|[penanggung jawab]|
 |[dan seterusnya untuk semua topik]|
@@ -83,7 +85,7 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
         
         # Generate content with specific configuration
         generation_config = {
-            "temperature": 0.3,
+            "temperature": 0.5,
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 2048,
