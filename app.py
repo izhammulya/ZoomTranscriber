@@ -457,6 +457,7 @@ def main():
         1. **Upload** transkrip Zoom Anda
         2. **Process** transkrip nya by button
         3. **Review** Notulen yang sudah jadi
+        4. **Reclick** Jika hasil belum memuaskan, klik tombol "Generate Notulen" lagi
         """)
         
         st.header("📊 Kelebihannya cuy")
