@@ -533,7 +533,7 @@ def main():
             st.download_button(
                 label="📄 Download as TXT",
                 data=st.session_state.ai_notulen,
-                file_name=f"meeting_minutes_{timestamp}.txt",
+                file_name=f"Notulen_meeting_{timestamp}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
@@ -541,12 +541,12 @@ def main():
         with col2:
             # Word document download
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            word_buffer = create_word_document(st.session_state.ai_notulen, f"meeting_minutes_{timestamp}.docx")
+            word_buffer = create_word_document(st.session_state.ai_notulen, f"Notulen_meeting_{timestamp}.docx")
             if word_buffer:
                 st.download_button(
                     label="📝 Download Word Document",
                     data=word_buffer.getvalue(),
-                    file_name=f"meeting_minutes_{timestamp}.docx",
+                    file_name=f"Notulen_meeting_{timestamp}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
