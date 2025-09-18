@@ -4,8 +4,10 @@ from datetime import datetime
 import io
 import google.generativeai as genai
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.oxml import parse_xml
 
 def process_vtt_text(vtt_text):
     """
@@ -127,15 +129,220 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
 
 def create_word_document(content, filename):
     """
-    Create a Word document from the generated content
+    Create a Word document from the generated content following the template
     """
     try:
         doc = Document()
-        title = doc.add_heading('Notulen Rapat', level=1)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Add the content as plain text
-        doc.add_paragraph(content)
+        # Set document margins
+        sections = doc.sections
+        for section in sections:
+            section.top_margin = Inches(1)
+            section.bottom_margin = Inches(1)
+            section.left_margin = Inches(1)
+            section.right_margin = Inches(1)
+        
+        # Add title
+        title = doc.add_heading('Notulen Rapat', level=0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title.runs[0]
+        title_run.font.size = Pt(16)
+        title_run.font.bold = True
+        
+        # Parse the content to extract sections
+        lines = content.split('\n')
+        current_section = None
+        table_data = []
+        agenda_items = []
+        participants = []
+        discussion_points = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Extract meeting name
+            if line.startswith('|Nama Rapat|') and '|' in line:
+                meeting_name = line.split('|')[2]
+            
+            # Extract date
+            elif line.startswith('|Hari/Tanggal|') and '|' in line:
+                meeting_date = line.split('|')[2]
+            
+            # Extract time
+            elif line.startswith('|Waktu|') and '|' in line:
+                meeting_time = line.split('|')[2]
+            
+            # Extract location
+            elif line.startswith('|Tempat|') and '|' in line:
+                meeting_location = line.split('|')[2]
+            
+            # Extract leader
+            elif line.startswith('|Pemimpin Rapat|') and '|' in line:
+                meeting_leader = line.split('|')[2]
+            
+            # Extract agenda items
+            elif line.startswith('- ') and 'Agenda:' not in line:
+                agenda_items.append(line[2:])
+            
+            # Extract participants
+            elif line.startswith('|') and '|' in line and any(char.isdigit() for char in line.split('|')[1]):
+                parts = line.split('|')
+                if len(parts) >= 4 and parts[1].strip().isdigit():
+                    participants.append((parts[1].strip(), parts[3].strip()))
+            
+            # Extract discussion points
+            elif line.startswith('|Poin Diskusi dan Arahan|'):
+                current_section = 'discussion'
+            elif current_section == 'discussion' and line.startswith('|') and '|' in line:
+                parts = line.split('|')
+                if len(parts) >= 3:
+                    if not parts[1].startswith('Kesimpulan') and parts[1].strip():
+                        discussion_points.append({
+                            'topic': parts[1].strip(),
+                            'responsible': parts[2].strip() if len(parts) > 2 else ''
+                        })
+                    elif 'Kesimpulan' in parts[1]:
+                        if discussion_points:
+                            discussion_points[-1]['conclusion'] = parts[2].strip() if len(parts) > 2 else ''
+        
+        # Create meeting info table
+        info_table = doc.add_table(rows=6, cols=2)
+        info_table.style = 'Table Grid'
+        
+        # Set table column widths
+        for row in info_table.rows:
+            row.cells[0].width = Inches(1.5)
+            row.cells[1].width = Inches(4.5)
+        
+        # Fill meeting info table
+        info_table.cell(0, 0).text = "Nama Rapat"
+        info_table.cell(0, 1).text = meeting_name if 'meeting_name' in locals() else "[Tidak disebutkan dalam transkrip]"
+        
+        info_table.cell(1, 0).text = "Hari/Tanggal"
+        info_table.cell(1, 1).text = meeting_date if 'meeting_date' in locals() else "[Tidak disebutkan dalam transkrip]"
+        
+        info_table.cell(2, 0).text = "Waktu"
+        info_table.cell(2, 1).text = meeting_time if 'meeting_time' in locals() else "[Tidak disebutkan dalam transkrip]"
+        
+        info_table.cell(3, 0).text = "Tempat"
+        info_table.cell(3, 1).text = meeting_location if 'meeting_location' in locals() else "[Tidak disebutkan dalam transkrip]"
+        
+        info_table.cell(4, 0).text = "Pemimpin Rapat"
+        info_table.cell(4, 1).text = meeting_leader if 'meeting_leader' in locals() else "[Tidak disebutkan dalam transkrip]"
+        
+        info_table.cell(5, 0).text = "Dibuat oleh"
+        info_table.cell(5, 1).text = "Group Transformasi Korporasi dan Manajemen Program"
+        
+        # Format table cells
+        for row in info_table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.space_after = Pt(0)
+                    for run in paragraph.runs:
+                        run.font.size = Pt(10)
+        
+        # Add spacing
+        doc.add_paragraph()
+        
+        # Add agenda section
+        agenda_heading = doc.add_heading('Agenda:', level=2)
+        agenda_heading.runs[0].font.size = Pt(12)
+        agenda_heading.runs[0].font.bold = True
+        
+        for item in agenda_items:
+            p = doc.add_paragraph(item, style='List Bullet')
+            p.paragraph_format.space_after = Pt(6)
+            for run in p.runs:
+                run.font.size = Pt(10)
+        
+        # Add spacing
+        doc.add_paragraph()
+        
+        # Add participants section
+        participants_heading = doc.add_heading('Peserta Rapat:', level=2)
+        participants_heading.runs[0].font.size = Pt(12)
+        participants_heading.runs[0].font.bold = True
+        
+        # Create participants table
+        if participants:
+            part_table = doc.add_table(rows=len(participants) + 1, cols=3)
+            part_table.style = 'Table Grid'
+            
+            # Set table column widths
+            for row in part_table.rows:
+                row.cells[0].width = Inches(0.5)
+                row.cells[1].width = Inches(0.5)
+                row.cells[2].width = Inches(4)
+            
+            # Add headers
+            part_table.cell(0, 0).text = "No"
+            part_table.cell(0, 1).text = ""
+            part_table.cell(0, 2).text = "Nama/Jabatan"
+            
+            # Add participants
+            for i, (num, participant) in enumerate(participants, 1):
+                part_table.cell(i, 0).text = num
+                part_table.cell(i, 1).text = ""
+                part_table.cell(i, 2).text = participant
+            
+            # Format table cells
+            for row in part_table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        for run in paragraph.runs:
+                            run.font.size = Pt(10)
+        
+        # Add spacing
+        doc.add_paragraph()
+        
+        # Add discussion points section
+        discussion_heading = doc.add_heading('Poin Diskusi dan Arahan:', level=2)
+        discussion_heading.runs[0].font.size = Pt(12)
+        discussion_heading.runs[0].font.bold = True
+        
+        # Create discussion table
+        if discussion_points:
+            disc_table = doc.add_table(rows=0, cols=2)
+            disc_table.style = 'Table Grid'
+            
+            # Set table column widths
+            for row in disc_table.rows:
+                row.cells[0].width = Inches(3.5)
+                row.cells[1].width = Inches(2)
+            
+            for point in discussion_points:
+                # Add topic row
+                cells = disc_table.add_row().cells
+                cells[0].text = point['topic']
+                cells[1].text = point['responsible']
+                
+                # Add conclusion row if exists
+                if 'conclusion' in point and point['conclusion']:
+                    cells = disc_table.add_row().cells
+                    cells[0].text = "Kesimpulan :\n• " + point['conclusion']
+                    cells[1].text = point['responsible']
+            
+            # Format table cells
+            for row in disc_table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        for run in paragraph.runs:
+                            run.font.size = Pt(10)
+        
+        # Add spacing
+        doc.add_paragraph()
+        
+        # Add disclaimer
+        disclaimer = doc.add_paragraph()
+        disclaimer.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        disclaimer_run = disclaimer.add_run("Disclaimer:\n")
+        disclaimer_run.italic = True
+        disclaimer_run.font.size = Pt(10)
+        disclaimer_run = disclaimer.add_run("Jika tidak ada tanggapan dalam tiga hari sejak dokumen ini didistribusikan, maka dokumen ini dianggap final.")
+        disclaimer_run.italic = True
+        disclaimer_run.font.size = Pt(10)
         
         # Save to bytes buffer
         buffer = io.BytesIO()
