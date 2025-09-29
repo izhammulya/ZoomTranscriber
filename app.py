@@ -27,12 +27,7 @@ def generate_notulen_with_ai(sentences, api_key):
     try:
         # model = genai.GenerativeModel("gemini-1.5-flash-8b")
         model = genai.GenerativeModel("models/gemini-2.5-flash")
-        print("Model initialized successfully")
-    except Exception as e:
-        print("Model initialized successfully")
-    except Exception as e:
-        print(f"Error initializing model: {e}")
-        exit()
+        
         
         # EXACT PROMPT - DO NOT CHANGE
         prompt = f"""
