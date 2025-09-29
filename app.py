@@ -435,7 +435,8 @@ def generate_notulen_with_ai(sentences, api_key):
         # Initialize model - CHANGED TO STANDARD FLASH MODEL
         # model = genai.GenerativeModel("gemini-2.5-flash")
 
-        model = genai.GenerativeModel("models/gemini-2.5-flash-lite") 
+        # model = genai.GenerativeModel("models/gemini-2.5-flash-lite") 
+        model = model.GenerativeModel("models/gemma-3n-e2b-it")
         
         # REFINED PROMPT with strong emphasis on professional, non-sensitive content
         prompt = f"""
