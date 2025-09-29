@@ -30,8 +30,8 @@ def generate_notulen_with_ai(sentences, api_key):
         
         # Initialize model
         # model = genai.GenerativeModel("models/gemini-1.5-flash-8b-latest")
-        # model = genai.GenerativeModel("models/gemini-2.5-flash")
-        model = genai.GenerativeModel("models/gemma-3-27b-it")
+        model = genai.GenerativeModel("models/gemini-2.5-flash")
+        # model = genai.GenerativeModel("models/gemma-3-27b-it")
         
         # EXACT PROMPT - DO NOT CHANGE
         prompt = f"""
