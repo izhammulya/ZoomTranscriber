@@ -93,19 +93,31 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
         
         response = model.generate_content(prompt, generation_config=generation_config)
         
-        if response and response.text:
-            # Clean up the response to ensure proper table formatting
-            cleaned_response = response.text.strip()
+        # if response and response.text:
+        #     # Clean up the response to ensure proper table formatting
+        #     cleaned_response = response.text.strip()
             
-            # Ensure the response starts with the correct header
-            if not cleaned_response.startswith("# Notulen Rapat"):
-                # Try to find the start of the actual content
-                lines = cleaned_response.split('\n')
-                for i, line in enumerate(lines):
-                    if "Notulen Rapat" in line:
-                        cleaned_response = '\n'.join(lines[i:])
-                        break
-            
+        #     # Ensure the response starts with the correct header
+        #     if not cleaned_response.startswith("# Notulen Rapat"):
+        #         # Try to find the start of the actual content
+        #         lines = cleaned_response.split('\n')
+        #         for i, line in enumerate(lines):
+        #             if "Notulen Rapat" in line:
+        #                 cleaned_response = '\n'.join(lines[i:])
+        #                 break
+
+        # --- FIX: Safe extraction (avoid response.text error) ---
+        if response and response.candidates:
+            texts = []
+            for candidate in response.candidates:
+                if candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            texts.append(part.text)
+            if texts:
+                return "\n".join(texts)
+
+    return "⚠️ No text output from Gemini (possibly finish_reason=2)."
             return {
                 'success': True,
                 'content': cleaned_response,
