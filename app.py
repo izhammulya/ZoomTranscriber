@@ -23,7 +23,7 @@ def generate_notulen_with_ai(sentences, api_key):
     Uses the exact prompt provided by the user
     """
     try:
-        # Configure API - THIS WAS MISSING
+        # Configure API
         genai.configure(api_key=api_key)
         
         # Initialize model - KEEPING YOUR EXACT MODEL
@@ -83,41 +83,70 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-        # Generate content with specific configuration
+        # Generate content with specific configuration and safety settings
         generation_config = {
-            "temperature": 0.5,
+            "temperature": 0.3,  # Slightly lower for more consistent results
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 2048,
         }
         
-        response = model.generate_content(prompt, generation_config=generation_config)
+        # Add safety settings to prevent blocking
+        safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH", 
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_ONLY_HIGH"
+            }
+        ]
         
-        # if response and response.text:
-        #     # Clean up the response to ensure proper table formatting
-        #     cleaned_response = response.text.strip()
+        response = model.generate_content(
+            prompt, 
+            generation_config=generation_config,
+            safety_settings=safety_settings
+        )
+        
+        # Better response handling
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback.block_reason:
+            return {
+                'success': False,
+                'content': None,
+                'error': f"Response blocked due to: {response.prompt_feedback.block_reason}"
+            }
+        
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason == 2:
+                return {
+                    'success': False,
+                    'content': None,
+                    'error': "Response was filtered for safety reasons. Please try with different transcript content."
+                }
+        
+        if response and hasattr(response, 'text') and response.text:
+            # Clean up the response to ensure proper table formatting
+            cleaned_response = response.text.strip()
             
-        #     # Ensure the response starts with the correct header
-        #     if not cleaned_response.startswith("# Notulen Rapat"):
-        #         # Try to find the start of the actual content
-        #         lines = cleaned_response.split('\n')
-        #         for i, line in enumerate(lines):
-        #             if "Notulen Rapat" in line:
-        #                 cleaned_response = '\n'.join(lines[i:])
-        #                 break
-
-        # --- FIX: Safe extraction (avoid response.text error) ---
-        if response and response.candidates:
-            texts = []
-            for candidate in response.candidates:
-                if candidate.content.parts:
-                    for part in candidate.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            texts.append(part.text)
-            if texts:
-                return "\n".join(texts)
-
-    return "⚠️ No text output from Gemini (possibly finish_reason=2)."
+            # Ensure the response starts with the correct header
+            if not cleaned_response.startswith("# Notulen Rapat"):
+                # Try to find the start of the actual content
+                lines = cleaned_response.split('\n')
+                for i, line in enumerate(lines):
+                    if "Notulen Rapat" in line:
+                        cleaned_response = '\n'.join(lines[i:])
+                        break
+            
             return {
                 'success': True,
                 'content': cleaned_response,
@@ -127,14 +156,14 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
             return {
                 'success': False,
                 'content': None,
-                'error': 'Empty response from model'
+                'error': 'Empty response from model. This may be due to content filtering.'
             }
             
     except Exception as e:
         return {
             'success': False,
             'content': None,
-            'error': str(e)
+            'error': f"API Error: {str(e)}"
         }
 
 def create_word_document(content, filename):
@@ -391,14 +420,6 @@ def main():
         color: #666;
         margin-bottom: 2rem;
     }
-    .upload-container {
-        background: #f8f9fa;
-        padding: 2rem;
-        border-radius: 10px;
-        border: 2px dashed #ddd;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
     .stButton>button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -406,11 +427,6 @@ def main():
         border-radius: 8px;
         padding: 0.75rem 1.5rem;
         font-weight: 600;
-    }
-    .stButton>button:hover {
-        background: linear-gradient(90deg, #5a6fd8 0%, #6a4190 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     .success-box {
         background: #d4edda;
@@ -464,18 +480,9 @@ def main():
         st.header("📋 How to Use")
         st.markdown("""
         1. **Upload** transkrip Zoom Anda
-        2. **Process** transkrip nya by button
+        2. **Process** transkrip dengan tombol
         3. **Review** Notulen yang sudah jadi
-        4. **Reclick** Jika hasil belum memuaskan, klik tombol "Generate Notulen" lagi
-        """)
-        
-        st.header("📊 Kelebihannya cuy")
-        st.markdown("""
-        - ✅ Sudah disesuaikan dengan format notulen
-        - ✅ Ekstraksi agenda
-        - ✅ Mengidentifikasi peserta (speaker)
-        - ✅ Menggunakan bahasa Indonesia yang baik
-        - ✅ Downloadable
+        4. **Download** format yang diinginkan
         """)
 
     # Main content
@@ -507,6 +514,11 @@ def main():
                     content = uploaded_file.getvalue().decode("utf-8")
                     cleaned_text = process_vtt_text(content)
                     
+                    # Check if transcript has sufficient content
+                    if len(cleaned_text.strip()) < 50:
+                        st.error("❌ Transkrip terlalu pendek. Pastikan file berisi konten rapat yang cukup.")
+                        return
+                    
                     # Generate AI content
                     ai_result = generate_notulen_with_ai(cleaned_text, api_key)
                     
@@ -516,6 +528,7 @@ def main():
                         st.success("✅ Generate Notulen berhasil & sukses !")
                     else:
                         st.error(f"❌ Error: {ai_result['error']}")
+                        st.info("💡 Tips: Coba dengan transkrip yang berbeda atau periksa konten transkrip Anda.")
                         
                 except Exception as e:
                     st.error(f"❌ Processing error: {str(e)}")
@@ -526,7 +539,7 @@ def main():
         st.markdown("### 📋 Generated Notulen")
         
         # Success message
-        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong>  Silahkan review hasilnya.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong> Silahkan review hasilnya.</div>', unsafe_allow_html=True)
         
         # Display the content
         st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
