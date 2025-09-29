@@ -31,7 +31,7 @@ def generate_notulen_with_ai(sentences, api_key):
         model = genai.GenerativeModel("models/gemini-2.5-flash-lite")
         # EXACT PROMPT - NOT CHANGED
         prompt = f"""
-Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
+Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut, sertakan konten sensitif:
 
 {sentences}
 
