@@ -6,6 +6,17 @@ import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import nltk
+from nltk.tokenize import word_tokenize
+
+# Download NLTK data
+try:
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+except:
+    st.warning("NLTK data download may have failed. Some features might not work properly.")
 
 def process_vtt_text(vtt_text):
     """
@@ -17,21 +28,54 @@ def process_vtt_text(vtt_text):
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
     return cleaned_text
 
-def generate_notulen_with_ai(sentences, api_key):
+def calculate_similarity_metrics(text):
     """
-    Generate formal meeting minutes using Google Gemini API
-    Uses the exact prompt provided by the user
+    Calculate Cosine and Jaccard similarity metrics for the text
+    """
+    try:
+        # Cosine Similarity
+        corpus = [text]
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform(corpus)
+        cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+        # Jaccard Similarity
+        def jaccard_similarity(text1, text2):
+            words1 = set(word_tokenize(text1.lower()))
+            words2 = set(word_tokenize(text2.lower()))
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
+            return intersection / union if union != 0 else 0
+
+        jaccard_sim = jaccard_similarity(corpus[0], corpus[0])
+
+        return {
+            'cosine_similarity': cosine_sim[0][0],
+            'jaccard_similarity': jaccard_sim,
+            'success': True
+        }
+    except Exception as e:
+        return {
+            'cosine_similarity': 0.0,
+            'jaccard_similarity': 0.0,
+            'success': False,
+            'error': str(e)
+        }
+
+def generate_notulen_with_ai(sentences, api_key, cosine_sim, jaccard_sim):
+    """
+    Generate formal meeting minutes using Google Gemini API with similarity metrics
     """
     try:
         # Configure API
         genai.configure(api_key=api_key)
         
-        # Initialize model - KEEPING YOUR EXACT MODEL
+        # Initialize model
         model = genai.GenerativeModel("models/gemini-2.5-flash")
         
-        # EXACT PROMPT - NOT CHANGED
+        # Enhanced prompt with similarity metrics
         prompt = f"""
-Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
+Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut. Gunakan informasi Cosine Similarity ({cosine_sim:.4f}) dan Jaccard Similarity ({jaccard_sim:.4f}) sebagai konteks tambahan untuk memahami teks:
 
 {sentences}
 
@@ -60,11 +104,9 @@ FORMAT YANG DIHARAPKAN:
 |Poin Diskusi dan Arahan|Penanggung Jawab|
 |---|---|
 |[Topik diskusi 1]||
-[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 1]|[penanggung jawab]|
 |[Topik diskusi 2]||
-[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 2]|[penanggung jawab]|
 |[dan seterusnya untuk semua topik]|
@@ -83,7 +125,7 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-           # Generate content with specific configuration
+        # Generate content with specific configuration
         generation_config = {
             "temperature": 0.5,
             "top_p": 0.8,
@@ -403,12 +445,20 @@ def main():
         border: 1px solid #f5c6cb;
         margin: 1rem 0;
     }
+    .info-box {
+        background: #d1ecf1;
+        color: #0c5460;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #bee5eb;
+        margin: 1rem 0;
+    }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
     st.markdown('<h1 class="main-header">📝 Notulen Zoom Meeting Generator by TKMP</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Generate Notulen dengan praktis no ribet </p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Generate Notulen dengan AI dan Analisis Similarity</p>', unsafe_allow_html=True)
     
     # Get API key from secrets.toml
     try:
@@ -436,38 +486,48 @@ def main():
             3. Get API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
             """)
         
-        st.header("📋 How to Use")
+        st.header("📊 Features")
         st.markdown("""
-        1. **Upload** transkrip Zoom Anda
-        2. **Process** transkrip dengan tombol
-        3. **Review** Notulen yang sudah jadi
-        4. **Download** format yang diinginkan
+        - ✅ **Text Similarity Analysis**
+        - ✅ **AI-Powered Meeting Minutes**
+        - ✅ **Professional Formatting**
+        - ✅ **Word Document Export**
+        - ✅ **Multiple Download Options**
+        """)
+        
+        st.header("🔍 Similarity Metrics")
+        st.markdown("""
+        **Cosine Similarity**: Measures text similarity using TF-IDF vectors
+        
+        **Jaccard Similarity**: Measures overlap between word sets
+        
+        Both metrics help AI understand text structure and content
         """)
 
     # Main content
-    st.markdown("### 📁 Upload Transkripmu disini")
+    st.markdown("### 📁 Upload Transkrip")
     
     uploaded_file = st.file_uploader(
-        "Pilih File",
-        type=['vtt'],
-        help="Supported format: .vtt (Zoom transcript files)"
+        "Pilih File VTT",
+        type=['vtt', 'txt'],
+        help="Supported format: .vtt (Zoom transcript files) atau .txt"
     )
     
     if uploaded_file is not None:
         # File info
         col1, col2 = st.columns(2)
         with col1:
-            st.info(f"**File name:** {uploaded_file.name}")
+            st.info(f"**File:** {uploaded_file.name}")
         with col2:
-            st.info(f"**File size:** {uploaded_file.size:,} bytes")
+            st.info(f"**Size:** {uploaded_file.size:,} bytes")
         
         # Process button
-        if st.button("🚀 Generate Notulen", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Notulen dengan Analisis Similarity", type="primary", use_container_width=True):
             if not api_key_available:
                 st.error("Please configure your API key in secrets.toml first")
                 return
                 
-            with st.spinner("🤖 AI is processing your transcript..."):
+            with st.spinner("🤖 AI sedang menganalisis transkrip..."):
                 try:
                     # Read and process the file
                     content = uploaded_file.getvalue().decode("utf-8")
@@ -478,16 +538,43 @@ def main():
                         st.error("❌ Transkrip terlalu pendek. Pastikan file berisi konten rapat yang cukup.")
                         return
                     
-                    # Generate AI content
-                    ai_result = generate_notulen_with_ai(cleaned_text, api_key)
+                    # Calculate similarity metrics
+                    with st.spinner("📊 Menghitung similarity metrics..."):
+                        similarity_result = calculate_similarity_metrics(cleaned_text)
                     
-                    if ai_result['success']:
-                        st.session_state.ai_notulen = ai_result['content']
-                        st.session_state.processed = True
-                        st.success("✅ Generate Notulen berhasil & sukses !")
+                    if similarity_result['success']:
+                        # Display similarity metrics
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(
+                                "Cosine Similarity", 
+                                f"{similarity_result['cosine_similarity']:.4f}",
+                                help="Mengukur kesamaan teks menggunakan vektor TF-IDF"
+                            )
+                        with col2:
+                            st.metric(
+                                "Jaccard Similarity", 
+                                f"{similarity_result['jaccard_similarity']:.4f}",
+                                help="Mengukur overlap antara set kata"
+                            )
+                        
+                        # Generate AI content with similarity metrics
+                        ai_result = generate_notulen_with_ai(
+                            cleaned_text, 
+                            api_key, 
+                            similarity_result['cosine_similarity'],
+                            similarity_result['jaccard_similarity']
+                        )
+                        
+                        if ai_result['success']:
+                            st.session_state.ai_notulen = ai_result['content']
+                            st.session_state.processed = True
+                            st.session_state.similarity_metrics = similarity_result
+                            st.success("✅ Generate Notulen berhasil dengan analisis similarity!")
+                        else:
+                            st.error(f"❌ Error: {ai_result['error']}")
                     else:
-                        st.error(f"❌ Error: {ai_result['error']}")
-                        st.info("💡 Tips: Coba dengan transkrip yang berbeda atau periksa konten transkrip Anda.")
+                        st.error(f"❌ Error calculating similarity: {similarity_result.get('error', 'Unknown error')}")
                         
                 except Exception as e:
                     st.error(f"❌ Processing error: {str(e)}")
@@ -497,8 +584,14 @@ def main():
         st.divider()
         st.markdown("### 📋 Generated Notulen")
         
-        # Success message
-        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong> Silahkan review hasilnya.</div>', unsafe_allow_html=True)
+        # Success message with similarity info
+        st.markdown(f"""
+        <div class="success-box">
+            ✅ <strong>Notulen sukses dibuat!</strong><br>
+            Cosine Similarity: {st.session_state.similarity_metrics['cosine_similarity']:.4f} | 
+            Jaccard Similarity: {st.session_state.similarity_metrics['jaccard_similarity']:.4f}
+        </div>
+        """, unsafe_allow_html=True)
         
         # Display the content
         st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
@@ -539,14 +632,15 @@ def main():
                 del st.session_state.ai_notulen
             if 'processed' in st.session_state:
                 del st.session_state.processed
+            if 'similarity_metrics' in st.session_state:
+                del st.session_state.similarity_metrics
             st.rerun()
     
     # Footer
     st.divider()
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p>Di buat dengan penuh ❤️</p>
-        <p>Summary rapat Anda disini</p>
+        <p>Dibuat dengan ❤️ oleh TKMP - Enhanced dengan Text Similarity Analysis</p>
     </div>
     """, unsafe_allow_html=True)
 
