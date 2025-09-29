@@ -26,8 +26,9 @@ def generate_notulen_with_ai(sentences, api_key):
         genai.configure(api_key=api_key)
         
         # Initialize model
-        model = genai.GenerativeModel("gemini-2.5-flash")  # Changed to more stable model
-        
+        # model = genai.GenerativeModel("gemini-2.5-flash")
+
+        model = genai.GenerativeModel("models/gemini-2.5-flash-lite")
         # EXACT PROMPT - NOT CHANGED
         prompt = f"""
 Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
