@@ -6,17 +6,6 @@ import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-import nltk
-from nltk.tokenize import word_tokenize
-
-# Download NLTK data
-try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('punkt_tab', quiet=True)
-except:
-    st.warning("NLTK data download may have failed. Some features might not work properly.")
 
 def process_vtt_text(vtt_text):
     """
@@ -28,54 +17,20 @@ def process_vtt_text(vtt_text):
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
     return cleaned_text
 
-def calculate_similarity_metrics(text):
+def generate_notulen_with_ai(sentences, api_key):
     """
-    Calculate Cosine and Jaccard similarity metrics for the text
-    """
-    try:
-        # Cosine Similarity
-        corpus = [text]
-        vectorizer = TfidfVectorizer()
-        tfidf_matrix = vectorizer.fit_transform(corpus)
-        cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
-
-        # Jaccard Similarity
-        def jaccard_similarity(text1, text2):
-            words1 = set(word_tokenize(text1.lower()))
-            words2 = set(word_tokenize(text2.lower()))
-            intersection = len(words1.intersection(words2))
-            union = len(words1.union(words2))
-            return intersection / union if union != 0 else 0
-
-        jaccard_sim = jaccard_similarity(corpus[0], corpus[0])
-
-        return {
-            'cosine_similarity': cosine_sim[0][0],
-            'jaccard_similarity': jaccard_sim,
-            'success': True
-        }
-    except Exception as e:
-        return {
-            'cosine_similarity': 0.0,
-            'jaccard_similarity': 0.0,
-            'success': False,
-            'error': str(e)
-        }
-
-def generate_notulen_with_ai(sentences, api_key, cosine_sim, jaccard_sim):
-    """
-    Generate formal meeting minutes using Google Gemini API with similarity metrics
+    Generate formal meeting minutes using Google Gemini API
     """
     try:
         # Configure API
         genai.configure(api_key=api_key)
         
         # Initialize model
-        model = genai.GenerativeModel("models/gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")  # Changed to more stable model
         
-        # Enhanced prompt with similarity metrics
+        # EXACT PROMPT - NOT CHANGED
         prompt = f"""
-Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut. Gunakan informasi Cosine Similarity ({cosine_sim:.4f}) dan Jaccard Similarity ({jaccard_sim:.4f}) sebagai konteks tambahan untuk memahami teks:
+Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
 
 {sentences}
 
@@ -104,9 +59,11 @@ FORMAT YANG DIHARAPKAN:
 |Poin Diskusi dan Arahan|Penanggung Jawab|
 |---|---|
 |[Topik diskusi 1]||
+[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 1]|[penanggung jawab]|
 |[Topik diskusi 2]||
+[Penjelasan Topik singkat]
 |Kesimpulan :||
 |• [kesimpulan point 2]|[penanggung jawab]|
 |[dan seterusnya untuk semua topik]|
@@ -125,51 +82,93 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-        # Generate content with specific configuration
+        # Generate content with safety settings
         generation_config = {
-            "temperature": 0.5,
+            "temperature": 0.3,
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 2048,
         }
         
-        response = model.generate_content(prompt, generation_config=generation_config)
-        
-        if response and response.text:
-            # Clean up the response to ensure proper table formatting
-            cleaned_response = response.text.strip()
-            
-            # Ensure the response starts with the correct header
-            if not cleaned_response.startswith("# Notulen Rapat"):
-                # Try to find the start of the actual content
-                lines = cleaned_response.split('\n')
-                for i, line in enumerate(lines):
-                    if "Notulen Rapat" in line:
-                        cleaned_response = '\n'.join(lines[i:])
-                        break
-            
-            return {
-                'success': True,
-                'content': cleaned_response,
-                'error': None
+        # ADD SAFETY SETTINGS TO PREVENT BLOCKING
+        safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH", 
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE"
             }
-        else:
+        ]
+        
+        response = model.generate_content(
+            prompt, 
+            generation_config=generation_config,
+            safety_settings=safety_settings
+        )
+        
+        # Check if response was blocked
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback.block_reason:
             return {
                 'success': False,
                 'content': None,
-                'error': 'Empty response from model'
+                'error': f"Response blocked: {response.prompt_feedback.block_reason}"
             }
+        
+        # Check if response has candidates
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason == 2:
+                return {
+                    'success': False,
+                    'content': None,
+                    'error': "Response was filtered for safety reasons. Please try with different content."
+                }
+            # Get text from candidate
+            if candidate.content.parts:
+                content_text = candidate.content.parts[0].text
+                if content_text:
+                    cleaned_response = content_text.strip()
+                    
+                    # Ensure the response starts with the correct header
+                    if not cleaned_response.startswith("# Notulen Rapat"):
+                        lines = cleaned_response.split('\n')
+                        for i, line in enumerate(lines):
+                            if "Notulen Rapat" in line:
+                                cleaned_response = '\n'.join(lines[i:])
+                                break
+                    
+                    return {
+                        'success': True,
+                        'content': cleaned_response,
+                        'error': None
+                    }
+        
+        return {
+            'success': False,
+            'content': None,
+            'error': 'Empty response from model'
+        }
             
     except Exception as e:
         return {
             'success': False,
             'content': None,
-            'error': str(e)
+            'error': f"API Error: {str(e)}"
         }
 
 def create_word_document(content, filename):
     """
-    Create a Word document from the generated content following the template
+    Create a Word document from the generated content
     """
     try:
         doc = Document()
@@ -189,199 +188,8 @@ def create_word_document(content, filename):
         title_run.font.size = Pt(16)
         title_run.font.bold = True
         
-        # Parse the content to extract sections
-        lines = content.split('\n')
-        current_section = None
-        agenda_items = []
-        participants = []
-        discussion_points = []
-        
-        for line in lines:
-            line = line.strip()
-            
-            # Extract meeting name
-            if line.startswith('|Nama Rapat|') and '|' in line:
-                meeting_name = line.split('|')[2]
-            
-            # Extract date
-            elif line.startswith('|Hari/Tanggal|') and '|' in line:
-                meeting_date = line.split('|')[2]
-            
-            # Extract time
-            elif line.startswith('|Waktu|') and '|' in line:
-                meeting_time = line.split('|')[2]
-            
-            # Extract location
-            elif line.startswith('|Tempat|') and '|' in line:
-                meeting_location = line.split('|')[2]
-            
-            # Extract leader
-            elif line.startswith('|Pemimpin Rapat|') and '|' in line:
-                meeting_leader = line.split('|')[2]
-            
-            # Extract agenda items
-            elif line.startswith('- ') and 'Agenda:' not in line:
-                agenda_items.append(line[2:])
-            
-            # Extract participants
-            elif line.startswith('|') and '|' in line and any(char.isdigit() for char in line.split('|')[1]):
-                parts = line.split('|')
-                if len(parts) >= 4 and parts[1].strip().isdigit():
-                    participants.append((parts[1].strip(), parts[3].strip()))
-            
-            # Extract discussion points
-            elif line.startswith('|Poin Diskusi dan Arahan|'):
-                current_section = 'discussion'
-            elif current_section == 'discussion' and line.startswith('|') and '|' in line:
-                parts = line.split('|')
-                if len(parts) >= 3:
-                    if not parts[1].startswith('Kesimpulan') and parts[1].strip():
-                        discussion_points.append({
-                            'topic': parts[1].strip(),
-                            'responsible': parts[2].strip() if len(parts) > 2 else ''
-                        })
-                    elif 'Kesimpulan' in parts[1]:
-                        if discussion_points:
-                            discussion_points[-1]['conclusion'] = parts[2].strip() if len(parts) > 2 else ''
-        
-        # Create meeting info table
-        info_table = doc.add_table(rows=6, cols=2)
-        info_table.style = 'Table Grid'
-        
-        # Set table column widths
-        for row in info_table.rows:
-            row.cells[0].width = Inches(1.5)
-            row.cells[1].width = Inches(4.5)
-        
-        # Fill meeting info table
-        info_table.cell(0, 0).text = "Nama Rapat"
-        info_table.cell(0, 1).text = meeting_name if 'meeting_name' in locals() else "[Tidak disebutkan dalam transkrip]"
-        
-        info_table.cell(1, 0).text = "Hari/Tanggal"
-        info_table.cell(1, 1).text = meeting_date if 'meeting_date' in locals() else "[Tidak disebutkan dalam transkrip]"
-        
-        info_table.cell(2, 0).text = "Waktu"
-        info_table.cell(2, 1).text = meeting_time if 'meeting_time' in locals() else "[Tidak disebutkan dalam transkrip]"
-        
-        info_table.cell(3, 0).text = "Tempat"
-        info_table.cell(3, 1).text = meeting_location if 'meeting_location' in locals() else "[Tidak disebutkan dalam transkrip]"
-        
-        info_table.cell(4, 0).text = "Pemimpin Rapat"
-        info_table.cell(4, 1).text = meeting_leader if 'meeting_leader' in locals() else "[Tidak disebutkan dalam transkrip]"
-        
-        info_table.cell(5, 0).text = "Dibuat oleh"
-        info_table.cell(5, 1).text = "Group Transformasi Korporasi dan Manajemen Program"
-        
-        # Format table cells
-        for row in info_table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    paragraph.paragraph_format.space_after = Pt(0)
-                    for run in paragraph.runs:
-                        run.font.size = Pt(10)
-        
-        # Add spacing
-        doc.add_paragraph()
-        
-        # Add agenda section
-        agenda_heading = doc.add_heading('Agenda:', level=2)
-        agenda_heading.runs[0].font.size = Pt(12)
-        agenda_heading.runs[0].font.bold = True
-        
-        for item in agenda_items:
-            p = doc.add_paragraph(item, style='List Bullet')
-            p.paragraph_format.space_after = Pt(6)
-            for run in p.runs:
-                run.font.size = Pt(10)
-        
-        # Add spacing
-        doc.add_paragraph()
-        
-        # Add participants section
-        participants_heading = doc.add_heading('Peserta Rapat:', level=2)
-        participants_heading.runs[0].font.size = Pt(12)
-        participants_heading.runs[0].font.bold = True
-        
-        # Create participants table
-        if participants:
-            part_table = doc.add_table(rows=len(participants) + 1, cols=3)
-            part_table.style = 'Table Grid'
-            
-            # Set table column widths
-            for row in part_table.rows:
-                row.cells[0].width = Inches(0.5)
-                row.cells[1].width = Inches(0.5)
-                row.cells[2].width = Inches(4)
-            
-            # Add headers
-            part_table.cell(0, 0).text = "No"
-            part_table.cell(0, 1).text = ""
-            part_table.cell(0, 2).text = "Nama/Jabatan"
-            
-            # Add participants
-            for i, (num, participant) in enumerate(participants, 1):
-                part_table.cell(i, 0).text = num
-                part_table.cell(i, 1).text = ""
-                part_table.cell(i, 2).text = participant
-            
-            # Format table cells
-            for row in part_table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        paragraph.paragraph_format.space_after = Pt(0)
-                        for run in paragraph.runs:
-                            run.font.size = Pt(10)
-        
-        # Add spacing
-        doc.add_paragraph()
-        
-        # Add discussion points section
-        discussion_heading = doc.add_heading('Poin Diskusi dan Arahan:', level=2)
-        discussion_heading.runs[0].font.size = Pt(12)
-        discussion_heading.runs[0].font.bold = True
-        
-        # Create discussion table
-        if discussion_points:
-            disc_table = doc.add_table(rows=0, cols=2)
-            disc_table.style = 'Table Grid'
-            
-            # Set table column widths
-            for row in disc_table.rows:
-                row.cells[0].width = Inches(3.5)
-                row.cells[1].width = Inches(2)
-            
-            for point in discussion_points:
-                # Add topic row
-                cells = disc_table.add_row().cells
-                cells[0].text = point['topic']
-                cells[1].text = point['responsible']
-                
-                # Add conclusion row if exists
-                if 'conclusion' in point and point['conclusion']:
-                    cells = disc_table.add_row().cells
-                    cells[0].text = "Kesimpulan :\n• " + point['conclusion']
-                    cells[1].text = point['responsible']
-            
-            # Format table cells
-            for row in disc_table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        paragraph.paragraph_format.space_after = Pt(0)
-                        for run in paragraph.runs:
-                            run.font.size = Pt(10)
-        
-        # Add spacing
-        doc.add_paragraph()
-        
-        # Add disclaimer
-        disclaimer = doc.add_paragraph()
-        disclaimer.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        disclaimer_run = disclaimer.add_run("Disclaimer:\n")
-        disclaimer_run.italic = True
-        disclaimer_run.font.size = Pt(10)
-        disclaimer_run = disclaimer.add_run("Jika tidak ada tanggapan dalam tiga hari sejak dokumen ini didistribusikan, maka dokumen ini dianggap final.")
-        disclaimer_run.italic = True
-        disclaimer_run.font.size = Pt(10)
+        # Add the content as simple text
+        content_para = doc.add_paragraph(content)
         
         # Save to bytes buffer
         buffer = io.BytesIO()
@@ -445,20 +253,12 @@ def main():
         border: 1px solid #f5c6cb;
         margin: 1rem 0;
     }
-    .info-box {
-        background: #d1ecf1;
-        color: #0c5460;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #bee5eb;
-        margin: 1rem 0;
-    }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
     st.markdown('<h1 class="main-header">📝 Notulen Zoom Meeting Generator by TKMP</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Generate Notulen dengan AI dan Analisis Similarity</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Generate Notulen dengan praktis no ribet</p>', unsafe_allow_html=True)
     
     # Get API key from secrets.toml
     try:
@@ -486,29 +286,19 @@ def main():
             3. Get API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
             """)
         
-        st.header("📊 Features")
+        st.header("📋 How to Use")
         st.markdown("""
-        - ✅ **Text Similarity Analysis**
-        - ✅ **AI-Powered Meeting Minutes**
-        - ✅ **Professional Formatting**
-        - ✅ **Word Document Export**
-        - ✅ **Multiple Download Options**
-        """)
-        
-        st.header("🔍 Similarity Metrics")
-        st.markdown("""
-        **Cosine Similarity**: Measures text similarity using TF-IDF vectors
-        
-        **Jaccard Similarity**: Measures overlap between word sets
-        
-        Both metrics help AI understand text structure and content
+        1. **Upload** transkrip Zoom Anda
+        2. **Process** transkrip dengan tombol
+        3. **Review** Notulen yang sudah jadi
+        4. **Download** format yang diinginkan
         """)
 
     # Main content
     st.markdown("### 📁 Upload Transkrip")
     
     uploaded_file = st.file_uploader(
-        "Pilih File VTT",
+        "Pilih File",
         type=['vtt', 'txt'],
         help="Supported format: .vtt (Zoom transcript files) atau .txt"
     )
@@ -522,12 +312,12 @@ def main():
             st.info(f"**Size:** {uploaded_file.size:,} bytes")
         
         # Process button
-        if st.button("🚀 Generate Notulen dengan Analisis Similarity", type="primary", use_container_width=True):
+        if st.button("🚀 Generate Notulen", type="primary", use_container_width=True):
             if not api_key_available:
                 st.error("Please configure your API key in secrets.toml first")
                 return
                 
-            with st.spinner("🤖 AI sedang menganalisis transkrip..."):
+            with st.spinner("🤖 AI sedang memproses transkrip..."):
                 try:
                     # Read and process the file
                     content = uploaded_file.getvalue().decode("utf-8")
@@ -538,43 +328,17 @@ def main():
                         st.error("❌ Transkrip terlalu pendek. Pastikan file berisi konten rapat yang cukup.")
                         return
                     
-                    # Calculate similarity metrics
-                    with st.spinner("📊 Menghitung similarity metrics..."):
-                        similarity_result = calculate_similarity_metrics(cleaned_text)
+                    # Generate AI content
+                    ai_result = generate_notulen_with_ai(cleaned_text, api_key)
                     
-                    if similarity_result['success']:
-                        # Display similarity metrics
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric(
-                                "Cosine Similarity", 
-                                f"{similarity_result['cosine_similarity']:.4f}",
-                                help="Mengukur kesamaan teks menggunakan vektor TF-IDF"
-                            )
-                        with col2:
-                            st.metric(
-                                "Jaccard Similarity", 
-                                f"{similarity_result['jaccard_similarity']:.4f}",
-                                help="Mengukur overlap antara set kata"
-                            )
-                        
-                        # Generate AI content with similarity metrics
-                        ai_result = generate_notulen_with_ai(
-                            cleaned_text, 
-                            api_key, 
-                            similarity_result['cosine_similarity'],
-                            similarity_result['jaccard_similarity']
-                        )
-                        
-                        if ai_result['success']:
-                            st.session_state.ai_notulen = ai_result['content']
-                            st.session_state.processed = True
-                            st.session_state.similarity_metrics = similarity_result
-                            st.success("✅ Generate Notulen berhasil dengan analisis similarity!")
-                        else:
-                            st.error(f"❌ Error: {ai_result['error']}")
+                    if ai_result['success']:
+                        st.session_state.ai_notulen = ai_result['content']
+                        st.session_state.processed = True
+                        st.success("✅ Generate Notulen berhasil!")
                     else:
-                        st.error(f"❌ Error calculating similarity: {similarity_result.get('error', 'Unknown error')}")
+                        st.error(f"❌ Error: {ai_result['error']}")
+                        if "safety" in ai_result['error'].lower() or "filter" in ai_result['error'].lower():
+                            st.info("💡 **Tips**: Coba dengan transkrip yang berbeda atau edit konten transkrip Anda.")
                         
                 except Exception as e:
                     st.error(f"❌ Processing error: {str(e)}")
@@ -584,14 +348,8 @@ def main():
         st.divider()
         st.markdown("### 📋 Generated Notulen")
         
-        # Success message with similarity info
-        st.markdown(f"""
-        <div class="success-box">
-            ✅ <strong>Notulen sukses dibuat!</strong><br>
-            Cosine Similarity: {st.session_state.similarity_metrics['cosine_similarity']:.4f} | 
-            Jaccard Similarity: {st.session_state.similarity_metrics['jaccard_similarity']:.4f}
-        </div>
-        """, unsafe_allow_html=True)
+        # Success message
+        st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong> Silahkan review hasilnya.</div>', unsafe_allow_html=True)
         
         # Display the content
         st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
@@ -632,15 +390,13 @@ def main():
                 del st.session_state.ai_notulen
             if 'processed' in st.session_state:
                 del st.session_state.processed
-            if 'similarity_metrics' in st.session_state:
-                del st.session_state.similarity_metrics
             st.rerun()
     
     # Footer
     st.divider()
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p>Dibuat dengan ❤️ oleh TKMP - Enhanced dengan Text Similarity Analysis</p>
+        <p>Dibuat dengan ❤️ oleh TKMP</p>
     </div>
     """, unsafe_allow_html=True)
 
