@@ -83,59 +83,17 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-        # Generate content with specific configuration and safety settings
+           # Generate content with specific configuration
         generation_config = {
-            "temperature": 0.3,  # Slightly lower for more consistent results
+            "temperature": 0.5,
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 2048,
         }
         
-        # # Add safety settings to prevent blocking
-        # safety_settings = [
-        #     {
-        #         "category": "HARM_CATEGORY_HARASSMENT",
-        #         "threshold": "BLOCK_ONLY_HIGH"
-        #     },
-        #     {
-        #         "category": "HARM_CATEGORY_HATE_SPEECH", 
-        #         "threshold": "BLOCK_ONLY_HIGH"
-        #     },
-        #     {
-        #         "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        #         "threshold": "BLOCK_ONLY_HIGH"
-        #     },
-        #     {
-        #         "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-        #         "threshold": "BLOCK_ONLY_HIGH"
-        #     }
-        # ]
+        response = model.generate_content(prompt, generation_config=generation_config)
         
-        response = model.generate_content(
-            prompt, 
-            generation_config=generation_config
-            # ,
-            # safety_settings=safety_settings
-        )
-        
-        # Better response handling
-        if hasattr(response, 'prompt_feedback') and response.prompt_feedback.block_reason:
-            return {
-                'success': False,
-                'content': None,
-                'error': f"Response blocked due to: {response.prompt_feedback.block_reason}"
-            }
-        
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'finish_reason') and candidate.finish_reason == 2:
-                return {
-                    'success': False,
-                    'content': None,
-                    'error': "Response was filtered for safety reasons. Please try with different transcript content."
-                }
-        
-        if response and hasattr(response, 'text') and response.text:
+        if response and response.text:
             # Clean up the response to ensure proper table formatting
             cleaned_response = response.text.strip()
             
@@ -157,14 +115,14 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
             return {
                 'success': False,
                 'content': None,
-                'error': 'Empty response from model. This may be due to content filtering.'
+                'error': 'Empty response from model'
             }
             
     except Exception as e:
         return {
             'success': False,
             'content': None,
-            'error': f"API Error: {str(e)}"
+            'error': str(e)
         }
 
 def create_word_document(content, filename):
