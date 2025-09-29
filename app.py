@@ -26,7 +26,7 @@ def generate_notulen_with_ai(sentences, api_key):
         genai.configure(api_key=api_key)
         
         # Initialize model
-        model = genai.GenerativeModel("gemini-1.5-flash")  # Changed to more stable model
+        model = genai.GenerativeModel("gemini-2.5-flash")  # Changed to more stable model
         
         # EXACT PROMPT - NOT CHANGED
         prompt = f"""
