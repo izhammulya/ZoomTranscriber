@@ -113,8 +113,9 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
         
         response = model.generate_content(
             prompt, 
-            generation_config=generation_config,
-            safety_settings=safety_settings
+            generation_config=generation_config
+            # ,
+            # safety_settings=safety_settings
         )
         
         # Better response handling
