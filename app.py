@@ -433,7 +433,7 @@ def generate_notulen_with_ai(sentences, api_key):
         genai.configure(api_key=api_key)
         
         # Initialize model - using stable model
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         
         # EXACT PROMPT - NOT CHANGED
         prompt = f"""
