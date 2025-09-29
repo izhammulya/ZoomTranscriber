@@ -426,17 +426,21 @@ def process_vtt_text(vtt_text):
 
 def generate_notulen_with_ai(sentences, api_key):
     """
-    Generate formal meeting minutes using Google Gemini API - NO FILTERING
+    Generate formal meeting minutes using Google Gemini API
     """
     try:
         # Configure API
         genai.configure(api_key=api_key)
         
-        # Initialize model - using stable model
+        # Initialize model - CHANGED TO STANDARD FLASH MODEL
         model = genai.GenerativeModel("gemini-2.5-flash")
+
+        # model = genai.GenerativeModel("models/gemini-2.5-flash-lite") 
         
-        # EXACT PROMPT - NOT CHANGED
+        # REFINED PROMPT with strong emphasis on professional, non-sensitive content
         prompt = f"""
+**INI ADALAH DATA RAPAT FORMAL PERUSAHAAN. BUATKAN NOTULEN RAPAT DENGAN BAHASA INDONESIA YANG FORMAL DAN PROFESIONAL. HANYA FOKUS PADA AGENDA, DISKUSI, DAN KEPUTUSAN SAJA.**
+
 Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
 
 {sentences}
@@ -489,15 +493,16 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
-        # Generate content with NO SAFETY FILTERS
+        # Generate content with safety settings
         generation_config = {
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "top_k": 50,
-            "max_output_tokens": 4096,  # Increased token limit
+            "temperature": 0.3,
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 2048,
         }
         
-        # DISABLE ALL SAFETY FILTERS COMPLETELY
+        # ADD SAFETY SETTINGS TO PREVENT INPUT BLOCKING
+        # You've already done this, which helps ensure the input transcript is not the issue.
         safety_settings = [
             {
                 "category": "HARM_CATEGORY_HARASSMENT",
@@ -517,74 +522,55 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
             }
         ]
         
-        # Force generate content with retry logic
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = model.generate_content(
-                    prompt, 
-                    generation_config=generation_config,
-                    safety_settings=safety_settings
-                )
-                
-                # Force get the content regardless of blocking
-                if hasattr(response, 'candidates') and response.candidates:
-                    candidate = response.candidates[0]
-                    if hasattr(candidate, 'content') and candidate.content.parts:
-                        content_text = candidate.content.parts[0].text
-                        if content_text and content_text.strip():
-                            cleaned_response = content_text.strip()
-                            
-                            # Ensure the response starts with the correct header
-                            if not cleaned_response.startswith("# Notulen Rapat"):
-                                lines = cleaned_response.split('\n')
-                                for i, line in enumerate(lines):
-                                    if "Notulen Rapat" in line:
-                                        cleaned_response = '\n'.join(lines[i:])
-                                        break
-                            
-                            return {
-                                'success': True,
-                                'content': cleaned_response,
-                                'error': None
-                            }
-                
-                # If we get here but no content, try different approach
-                if hasattr(response, '_result') and response._result:
-                    if hasattr(response._result, 'candidates'):
-                        candidate = response._result.candidates[0]
-                        if hasattr(candidate, 'content'):
-                            parts = candidate.content.parts
-                            if parts and hasattr(parts[0], 'text'):
-                                content_text = parts[0].text
-                                if content_text:
-                                    return {
-                                        'success': True,
-                                        'content': content_text.strip(),
-                                        'error': None
-                                    }
-                
-                # Last resort - try to access any available text
-                if hasattr(response, 'text') and response.text:
+        response = model.generate_content(
+            prompt, 
+            generation_config=generation_config,
+            safety_settings=safety_settings
+        )
+        
+        # Check if response was blocked (Input filtering)
+        if hasattr(response, 'prompt_feedback') and response.prompt_feedback.block_reason:
+            return {
+                'success': False,
+                'content': None,
+                'error': f"Response blocked due to input content: {response.prompt_feedback.block_reason}"
+            }
+        
+        # Check if response has candidates (Output filtering - Finish Reason 2)
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            # This is the line that captures the OUTPUT safety filter
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason == 2:
+                # Provide a more specific error message based on the safety filter.
+                return {
+                    'success': False,
+                    'content': None,
+                    'error': "Response was filtered for safety reasons. The model's output likely contained sensitive content. Please review and edit your transcript."
+                }
+            # Get text from candidate
+            if candidate.content.parts:
+                content_text = candidate.content.parts[0].text
+                if content_text:
+                    cleaned_response = content_text.strip()
+                    
+                    # Ensure the response starts with the correct header
+                    if not cleaned_response.startswith("# Notulen Rapat"):
+                        lines = cleaned_response.split('\n')
+                        for i, line in enumerate(lines):
+                            if "Notulen Rapat" in line:
+                                cleaned_response = '\n'.join(lines[i:])
+                                break
+                    
                     return {
                         'success': True,
-                        'content': response.text.strip(),
+                        'content': cleaned_response,
                         'error': None
                     }
-                        
-            except Exception as e:
-                if attempt == max_retries - 1:  # Last attempt
-                    return {
-                        'success': False,
-                        'content': None,
-                        'error': f"Failed after {max_retries} attempts: {str(e)}"
-                    }
-                continue
         
         return {
             'success': False,
             'content': None,
-            'error': 'No response generated after multiple attempts'
+            'error': 'Empty response from model'
         }
             
     except Exception as e:
@@ -765,6 +751,8 @@ def main():
                         st.success("✅ Generate Notulen berhasil!")
                     else:
                         st.error(f"❌ Error: {ai_result['error']}")
+                        if "safety" in ai_result['error'].lower() or "filter" in ai_result['error'].lower():
+                            st.info("💡 **Tips**: Jika error ini berulang, coba **edit transkrip Anda** untuk menghapus konten yang mungkin sensitif atau coba **gunakan transkrip yang berbeda**.")
                         
                 except Exception as e:
                     st.error(f"❌ Processing error: {str(e)}")
