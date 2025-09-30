@@ -210,9 +210,9 @@ def create_word_document(content, filename):
         st.error(f"Error creating Word document: {e}")
         return None
 
-def chat_with_ai(message, api_key, chat_history=None):
+def chat_with_transcript(question, transcript_text, api_key, chat_history=None):
     """
-    Function for interactive chat with AI
+    Function for interactive chat based on the uploaded transcript
     """
     try:
         # Configure API
@@ -221,9 +221,25 @@ def chat_with_ai(message, api_key, chat_history=None):
         # Initialize model
         model = genai.GenerativeModel("gemini-2.5-flash-lite-preview-09-2025")
         
+        # Create context from transcript
+        context = f"""
+        Berikut adalah transkrip rapat yang akan digunakan sebagai referensi untuk menjawab pertanyaan:
+
+        {transcript_text}
+
+        INSTRUKSI:
+        1. JAWAB PERTANYAAN BERDASARKAN TRANSCRIPT DI ATAS SAJA
+        2. Jika informasi tidak ada dalam transcript, katakan "Informasi tidak ditemukan dalam transkrip"
+        3. Gunakan bahasa Indonesia yang formal dan profesional
+        4. Berikan jawaban yang spesifik berdasarkan data yang ada dalam transkrip
+        5. Jangan membuat informasi yang tidak ada dalam transkrip
+
+        Pertanyaan: {question}
+        """
+        
         # Generate content with safety settings
         generation_config = {
-            "temperature": 0.7,
+            "temperature": 0.3,
             "top_p": 0.8,
             "top_k": 40,
             "max_output_tokens": 1024,
@@ -249,7 +265,7 @@ def chat_with_ai(message, api_key, chat_history=None):
         ]
         
         response = model.generate_content(
-            message, 
+            context, 
             generation_config=generation_config,
             safety_settings=safety_settings
         )
@@ -338,6 +354,14 @@ def main():
         background: #f3e5f5;
         border-left: 4px solid #9c27b0;
     }
+    .info-box {
+        background: #e8f4fd;
+        color: #0c5460;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #b8daff;
+        margin: 1rem 0;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -377,10 +401,11 @@ def main():
         2. **Process** transkrip dengan tombol
         3. **Review** Notulen yang sudah jadi
         4. **Download** format yang diinginkan
+        5. **Chat** dengan konten transkrip
         """)
 
     # Main content - Tabs for different functionalities
-    tab1, tab2 = st.tabs(["📄 Generate Notulen", "💬 Chat Interaktif"])
+    tab1, tab2 = st.tabs(["📄 Generate Notulen", "💬 Chat dengan Transkrip"])
 
     with tab1:
         st.markdown("### 📁 Upload Transkrip")
@@ -393,12 +418,17 @@ def main():
         )
         
         if uploaded_file is not None:
+            # Store the uploaded file content in session state
+            content = uploaded_file.getvalue().decode("utf-8")
+            st.session_state.uploaded_transcript = process_vtt_text(content)
+            
             # File info
             col1, col2 = st.columns(2)
             with col1:
                 st.info(f"**File:** {uploaded_file.name}")
             with col2:
                 st.info(f"**Size:** {uploaded_file.size:,} bytes")
+                st.info(f"**Characters:** {len(st.session_state.uploaded_transcript):,}")
             
             # Process button
             if st.button("🚀 Generate Notulen", type="primary", use_container_width=True, key="generate_btn"):
@@ -408,17 +438,13 @@ def main():
                     
                 with st.spinner("🤖 AI sedang memproses transkrip..."):
                     try:
-                        # Read and process the file
-                        content = uploaded_file.getvalue().decode("utf-8")
-                        cleaned_text = process_vtt_text(content)
-                        
                         # Check if transcript has sufficient content
-                        if len(cleaned_text.strip()) < 50:
+                        if len(st.session_state.uploaded_transcript.strip()) < 50:
                             st.error("❌ Transkrip terlalu pendek. Pastikan file berisi konten rapat yang cukup.")
                             return
                         
                         # Generate AI content
-                        ai_result = generate_notulen_with_ai(cleaned_text, api_key)
+                        ai_result = generate_notulen_with_ai(st.session_state.uploaded_transcript, api_key)
                         
                         if ai_result['success']:
                             st.session_state.ai_notulen = ai_result['content']
@@ -482,56 +508,97 @@ def main():
                 st.rerun()
 
     with tab2:
-        st.markdown("### 💬 Chat Interaktif dengan AI")
-        st.markdown("Tanyakan apapun tentang notulen atau hal lainnya!")
+        st.markdown("### 💬 Chat dengan Transkrip")
         
-        # Initialize chat history
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
-        
-        # Display chat history
-        for message in st.session_state.chat_history:
-            if message["role"] == "user":
-                st.markdown(f'<div class="chat-message user-message"><strong>Anda:</strong> {message["content"]}</div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="chat-message assistant-message"><strong>AI:</strong> {message["content"]}</div>', unsafe_allow_html=True)
-        
-        # Chat input
-        user_input = st.text_input("Ketik pesan Anda:", placeholder="Tanyakan sesuatu...", key="chat_input")
-        
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button("Kirim", use_container_width=True, key="send_chat"):
-                if user_input.strip() and api_key_available:
-                    with st.spinner("AI sedang mengetik..."):
-                        chat_result = chat_with_ai(user_input, api_key)
-                        
-                        if chat_result['success']:
-                            # Add user message to history
-                            st.session_state.chat_history.append({
-                                "role": "user", 
-                                "content": user_input
-                            })
-                            
-                            # Add AI response to history
-                            st.session_state.chat_history.append({
-                                "role": "assistant",
-                                "content": chat_result['content']
-                            })
-                            
-                            # Clear input and rerun to update display
-                            st.rerun()
-                        else:
-                            st.error(f"Error: {chat_result['error']}")
-                elif not api_key_available:
-                    st.error("API Key tidak tersedia. Silakan konfigurasi di sidebar.")
-                elif not user_input.strip():
-                    st.warning("Silakan ketik pesan terlebih dahulu.")
-        
-        with col2:
-            if st.button("Hapus Chat", use_container_width=True, key="clear_chat"):
+        if 'uploaded_transcript' not in st.session_state or not st.session_state.uploaded_transcript:
+            st.markdown("""
+            <div class="info-box">
+                <strong>📝 Informasi:</strong> Silakan upload file transkrip VTT terlebih dahulu di tab "Generate Notulen" 
+                untuk mengaktifkan fitur chat.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.info("""
+            **Contoh pertanyaan yang bisa ditanyakan:**
+            - Siapa saja yang hadir dalam rapat?
+            - Apa agenda utama rapat ini?
+            - Keputusan apa yang diambil dalam rapat?
+            - Siapa yang bertanggung jawab untuk tindak lanjut?
+            - Kapan deadline yang disepakati?
+            """)
+        else:
+            st.markdown("""
+            <div class="success-box">
+                ✅ <strong>Transkrip tersedia!</strong> Anda dapat bertanya tentang konten rapat.
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Display transcript info
+            with st.expander("📊 Info Transkrip"):
+                st.text(f"Panjang transkrip: {len(st.session_state.uploaded_transcript)} karakter")
+                st.text(f"Jumlah baris: {st.session_state.uploaded_transcript.count(chr(10)) + 1}")
+            
+            # Initialize chat history
+            if "chat_history" not in st.session_state:
                 st.session_state.chat_history = []
-                st.rerun()
+            
+            # Display chat history
+            st.markdown("#### 💭 Percakapan")
+            for message in st.session_state.chat_history:
+                if message["role"] == "user":
+                    st.markdown(f'<div class="chat-message user-message"><strong>👤 Anda:</strong> {message["content"]}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 AI:</strong> {message["content"]}</div>', unsafe_allow_html=True)
+            
+            # Chat input
+            st.markdown("#### 💬 Tanya tentang rapat")
+            user_input = st.text_area(
+                "Pertanyaan Anda:",
+                placeholder="Contoh: Siapa pemimpin rapat? Apa keputusan yang diambil? Siapa yang hadir?",
+                key="chat_input",
+                height=80
+            )
+            
+            col1, col2, col3 = st.columns([1, 1, 2])
+            with col1:
+                if st.button("Kirim Pertanyaan", use_container_width=True, key="send_chat"):
+                    if user_input.strip() and api_key_available:
+                        with st.spinner("🔍 Mencari informasi dalam transkrip..."):
+                            chat_result = chat_with_transcript(
+                                user_input, 
+                                st.session_state.uploaded_transcript, 
+                                api_key
+                            )
+                            
+                            if chat_result['success']:
+                                # Add user message to history
+                                st.session_state.chat_history.append({
+                                    "role": "user", 
+                                    "content": user_input
+                                })
+                                
+                                # Add AI response to history
+                                st.session_state.chat_history.append({
+                                    "role": "assistant",
+                                    "content": chat_result['content']
+                                })
+                                
+                                # Clear input and rerun to update display
+                                st.rerun()
+                            else:
+                                st.error(f"Error: {chat_result['error']}")
+                    elif not api_key_available:
+                        st.error("API Key tidak tersedia. Silakan konfigurasi di sidebar.")
+                    elif not user_input.strip():
+                        st.warning("Silakan ketik pertanyaan terlebih dahulu.")
+            
+            with col2:
+                if st.button("Hapus Chat", use_container_width=True, key="clear_chat"):
+                    st.session_state.chat_history = []
+                    st.rerun()
+            
+            with col3:
+                st.info("💡 Tanya tentang peserta, agenda, keputusan, atau hal spesifik dari rapat")
     
     # Footer
     st.divider()
