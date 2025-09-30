@@ -400,8 +400,9 @@ def main():
         1. **Upload** transkrip Zoom Anda
         2. **Process** transkrip dengan tombol
         3. **Review** Notulen yang sudah jadi
-        4. **Download** format yang diinginkan
-        5. **Chat** dengan konten transkrip
+        4. **Re-Generate** dengan klik tombol generate jika hasil kurang memuaskan
+        5. **Chat** dengan konten transkrip apabila ingin menanyakan konten lebih spesifik
+        6. **Chat** bisa digunakan jika ada file VTT yang diupload
         """)
 
     # Main content - Tabs for different functionalities
