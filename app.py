@@ -29,7 +29,8 @@ def generate_notulen_with_ai(sentences, api_key):
         # model = genai.GenerativeModel("gemini-2.5-flash")
 
         # model = genai.GenerativeModel("models/gemini-2.5-flash-lite") 
-        model = genai.GenerativeModel("gemini-2.5-flash-lite-preview-09-2025")
+        # model = genai.GenerativeModel("gemini-2.5-flash-lite-preview-09-2025")
+        model = genai.GenerativeModel(""gemini-2.0-flash-001"")
         
         # REFINED PROMPT with strong emphasis on professional, non-sensitive content
         prompt = f"""
