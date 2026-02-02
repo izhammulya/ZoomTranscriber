@@ -133,8 +133,11 @@ def generate_notulen_with_ai(transcript, api_key):
                             'model': model_name
                         }
                         
-                except:
+                except Exception as e:
                     continue
+        except Exception as e:
+            # Continue to fallback
+            pass
     
     # Fallback jika AI gagal atau tidak ada API key
     fallback = create_fallback_notulen(transcript)
@@ -157,7 +160,7 @@ def create_word_document(content):
         doc.save(buffer)
         buffer.seek(0)
         return buffer
-    except:
+    except Exception as e:
         buffer = io.BytesIO()
         buffer.write(content.encode('utf-8'))
         buffer.seek(0)
@@ -191,7 +194,7 @@ def chat_with_transcript(question, transcript, api_key):
         response = model.generate_content(prompt)
         return response.text if response and response.text else "Tidak dapat menjawab saat ini"
         
-    except:
+    except Exception as e:
         return "Sistem chat sedang mengalami kendala"
 
 def main():
@@ -606,15 +609,15 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-# Initialize session state variables
-if 'total_generated' not in st.session_state:
-    st.session_state.total_generated = 0
-if 'total_chats' not in st.session_state:
-    st.session_state.total_chats = 0
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-
 if __name__ == "__main__":
+    # Initialize session state variables
+    if 'total_generated' not in st.session_state:
+        st.session_state.total_generated = 0
+    if 'total_chats' not in st.session_state:
+        st.session_state.total_chats = 0
+    if 'chat_history' not in st.session_state:
+        st.session_state.chat_history = []
+    
     main()
 
 # import streamlit as st
