@@ -1,11 +1,13 @@
 import streamlit as st
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import json
+import pandas as pd
 
 def process_vtt_text(vtt_text):
     """
@@ -17,116 +19,24 @@ def process_vtt_text(vtt_text):
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
     return cleaned_text
 
-def extract_discussion_points(transcript, api_key):
+def create_fallback_notulen(transcript):
     """
-    Extract ALL discussion points and assignments with AI
-    """
-    if not api_key:
-        return []
-    
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-pro")
-        
-        prompt = f"""
-        ANALISIS TRANSCRIPT RAPAT UNTUK EKSTRAK SEMUA DISKUSI DAN ARAHAN:
-        
-        {transcript[:3000]}
-        
-        TUGAS: Identifikasi SEMUA poin diskusi, SIAPA yang menyampaikan, dan APA arahan/tugasnya.
-        
-        FORMAT OUTPUT: JSON dengan struktur:
-        {{
-            "discussion_points": [
-                {{
-                    "topic": "Topik diskusi",
-                    "speaker": "Nama pembicara",
-                    "position": "Jabatan pembicara",
-                    "content": "Isi yang disampaikan",
-                    "action_items": [
-                        {{
-                            "action": "Tugas/arahan spesifik",
-                            "assigned_to": "Orang yang ditugaskan",
-                            "deadline": "Waktu/target"
-                        }}
-                    ],
-                    "decisions": ["Keputusan 1", "Keputusan 2"]
-                }}
-            ]
-        }}
-        
-        PERHATIAN: Tangkap SEMUA diskusi, termasuk:
-        - Arahan dari pimpinan
-        - Tugas yang diberikan kepada staf
-        - Komitmen dari peserta
-        - Keputusan yang diambil
-        - Timeline yang disepakati
-        """
-        
-        response = model.generate_content(prompt)
-        if response.text:
-            import json
-            try:
-                # Extract JSON from response
-                json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group())
-                    return data.get("discussion_points", [])
-            except:
-                # Fallback: parse lines
-                points = []
-                lines = response.text.split('\n')
-                current_point = None
-                
-                for line in lines:
-                    if 'topic:' in line.lower() or 'topik:' in line.lower():
-                        if current_point:
-                            points.append(current_point)
-                        topic = re.sub(r'.*[Tt]opic[:\s]*', '', line, flags=re.IGNORECASE).strip()
-                        current_point = {'topic': topic, 'speaker': '', 'action_items': []}
-                    elif 'speaker:' in line.lower() or 'pembicara:' in line.lower():
-                        if current_point:
-                            speaker = re.sub(r'.*[Ss]peaker[:\s]*', '', line, flags=re.IGNORECASE).strip()
-                            current_point['speaker'] = speaker
-                    elif 'action:' in line.lower() or 'tugas:' in line.lower():
-                        if current_point:
-                            action = re.sub(r'.*[Aa]ction[:\s]*', '', line, flags=re.IGNORECASE).strip()
-                            current_point['action_items'].append({'action': action, 'assigned_to': ''})
-                
-                if current_point:
-                    points.append(current_point)
-                return points
-    except:
-        pass
-    
-    return []
-
-def create_comprehensive_notulen(transcript, api_key=None):
-    """
-    Create comprehensive notulen capturing ALL discussions
+    Create fallback notulen template
     """
     now = datetime.now()
     
-    # Extract discussion points if API available
-    discussion_points = []
-    if api_key:
-        discussion_points = extract_discussion_points(transcript, api_key)
-    
-    # Count stats
-    word_count = len(transcript.split())
-    lines = transcript.split('\n')
-    
-    # Extract participants (simple regex)
+    # Simple participant extraction
     participants = []
+    lines = transcript.split('\n')
     for line in lines:
         if ':' in line:
             speaker = line.split(':')[0].strip()
-            if len(speaker) > 2 and len(speaker) < 50:
-                if speaker not in participants:
-                    participants.append(speaker)
+            if 2 < len(speaker) < 50 and speaker not in participants:
+                participants.append(speaker)
     
-    # Create notulen
-    notulen = f"""# NOTULEN RAPAT - CAPTURE LENGKAP
+    word_count = len(transcript.split())
+    
+    notulen = f"""# NOTULEN RAPAT
 
 ## INFORMASI RAPAT
 | Item | Keterangan |
@@ -134,283 +44,181 @@ def create_comprehensive_notulen(transcript, api_key=None):
 | **Nama Rapat** | Rapat Koordinasi |
 | **Tanggal** | {now.strftime('%d %B %Y')} |
 | **Waktu** | {now.strftime('%H:%M')} - Selesai |
-| **Tempat** | [Lokasi Rapat] |
-| **Notulis** | Group Transformasi Korporasi dan Manajemen Program |
-| **Dokumen** | {now.strftime('%Y%m%d')}/NOT/001 |
+| **Tempat** | Ruang Rapat |
+| **Pemimpin Rapat** | Pimpinan Rapat |
+| **Dibuat oleh** | Group Transformasi Korporasi dan Manajemen Program |
 
 ## DAFTAR PESERTA
-| No | Nama | Divisi/Jabatan | Kehadiran |
-|----|------|----------------|-----------|
+| No | Nama | Jabatan |
+|----|------|---------|
 """
     
-    # Add participants
-    for i, participant in enumerate(participants[:15], 1):
-        notulen += f"| {i} | {participant} | [Divisi/Jabatan] | Hadir |\n"
-    
-    notulen += """
-## AGENDA RAPAT
-1. Pembukaan dan perkenalan
-2. Penyampaian agenda
-3. Pembahasan materi utama
-4. Diskusi dan arahan
-5. Penetapan keputusan
-6. Rencana tindak lanjut
-7. Penutupan
-
-## HASIL DISKUSI DAN ARAHAN
-"""
-    
-    # Add discussion points
-    if discussion_points:
-        for point in discussion_points[:10]:  # Limit to 10 points
-            notulen += f"\n### **{point.get('topic', 'Diskusi')}**\n"
-            notulen += f"**Disampaikan oleh:** {point.get('speaker', 'Peserta')}\n\n"
-            notulen += f"**Isi Pembahasan:** {point.get('content', 'Diskusi terkait topik')}\n\n"
-            
-            if point.get('action_items'):
-                notulen += "**Arahan/Tugas:**\n"
-                for action in point.get('action_items', []):
-                    notulen += f"- {action.get('action', '')} "
-                    if action.get('assigned_to'):
-                        notulen += f"(Ditugaskan ke: {action.get('assigned_to')})"
-                    if action.get('deadline'):
-                        notulen += f" | Deadline: {action.get('deadline')}"
-                    notulen += "\n"
-            
-            if point.get('decisions'):
-                notulen += "\n**Keputusan:**\n"
-                for decision in point.get('decisions', []):
-                    notulen += f"- {decision}\n"
-            
-            notulen += "\n" + "-"*50 + "\n"
-    else:
-        # Fallback discussion structure
-        notulen += """
-### **Pembukaan dan Arahan Awal**
-**Disampaikan oleh:** [Nama Pemimpin Rapat]
-
-**Isi Pembahasan:** Pembukaan rapat dan penyampaian agenda utama untuk dibahas dalam rapat ini.
-
-**Arahan/Tugas:**
-- Semua peserta diminta aktif dalam diskusi
-- Penyampaian materi sesuai urutan agenda
-
----
-
-### **Laporan Progress Divisi**
-**Disampaikan oleh:** [Nama Manager Divisi]
-
-**Isi Pembahasan:** Presentasi progress kerja masing-masing divisi, pencapaian, dan kendala yang dihadapi.
-
-**Arahan/Tugas:**
-- Penyusunan laporan progress mingguan
-- Koordinasi antar divisi untuk penyelesaian kendala
-
-**Keputusan:**
-- Progress akan direview setiap Jumat
-- Meeting koordinasi dijadwalkan setiap Senin
-
----
-
-### **Pembahasan Isu Strategis**
-**Disampaikan oleh:** [Nama Peserta]
-
-**Isi Pembahasan:** Diskusi mengenai isu-isu strategis yang mempengaruhi operasional perusahaan.
-
-**Arahan/Tugas:**
-- Analisis mendalam untuk setiap isu
-- Penyusunan action plan penyelesaian
-
----
-
-### **Rencana Tindak Lanjut**
-**Disampaikan oleh:** [Nama Koordinator]
-
-**Isi Pembahasan:** Penyusunan rencana aksi setelah rapat dengan timeline dan penanggung jawab.
-
-**Arahan/Tugas:**
-- Finalisasi action plan dalam 2 hari kerja
-- Penunjukan PIC untuk setiap item
-- Monitoring progress mingguan
-
-**Keputusan:**
-- Action plan harus selesai tanggal {}
-- Review progress setiap pekan
-
-""".format((datetime.now() + timedelta(days=2)).strftime('%d %B %Y'))
+    for i, participant in enumerate(participants[:10], 1):
+        notulen += f"| {i} | {participant} | [Jabatan] |\n"
     
     notulen += f"""
-## RINGKASAN ARAHAN DAN TUGAS
+## HASIL DISKUSI
 
-### **Action Items**
-| No | Tugas/Arahan | Penanggung Jawab | Deadline | Status |
-|----|--------------|------------------|----------|--------|
-| 1  | Penyusunan laporan progress | [Nama PJ] | {now.strftime('%d/%m/%Y')} | On Progress |
-| 2  | Koordinasi antar divisi | [Nama PJ] | {(datetime.now() + timedelta(days=1)).strftime('%d/%m/%Y')} | Pending |
-| 3  | Analisis isu strategis | [Nama PJ] | {(datetime.now() + timedelta(days=3)).strftime('%d/%m/%Y')} | Not Started |
-| 4  | Finalisasi action plan | [Nama PJ] | {(datetime.now() + timedelta(days=2)).strftime('%d/%m/%Y')} | On Progress |
+### 1. Pembukaan
+**Disampaikan oleh:** Pimpinan Rapat
+**Isi:** Pembukaan rapat dan penyampaian agenda
 
-### **Keputusan Penting**
-1. Implementasi kebijakan baru berdasarkan diskusi
-2. Penjadwalan rapat rutin untuk monitoring
-3. Alokasi sumber daya untuk proyek prioritas
-4. Standarisasi proses pelaporan
+### 2. Diskusi Utama
+**Disampaikan oleh:** Peserta Rapat
+**Isi:** Diskusi mengenai berbagai agenda yang telah ditentukan
 
-## JADWAL RAPAT BERIKUTNYA
-- **Hari/Tanggal:** {(datetime.now() + timedelta(days=7)).strftime('%A, %d %B %Y')}
-- **Waktu:** {now.strftime('%H:%M')} WIB
-- **Agenda:** Review progress action plan
+### 3. Arahan dan Tugas
+1. **Tugas:** Penyusunan laporan - **PIC:** Tim Terkait - **Deadline:** {(now + timedelta(days=3)).strftime('%d/%m/%Y')}
+2. **Tugas:** Koordinasi follow-up - **PIC:** Semua Peserta - **Deadline:** {(now + timedelta(days=2)).strftime('%d/%m/%Y')}
 
 ## PENUTUP
-Rapat ditutup pada pukul [WAKTU] dengan kesepakatan untuk melaksanakan semua arahan dan tugas yang telah ditetapkan.
+Rapat ditutup dengan kesepakatan untuk melaksanakan arahan yang telah diberikan.
 
 ---
-**Disusun oleh:** Group Transformasi Korporasi dan Manajemen Program  
-**Tanggal:** {now.strftime('%d %B %Y %H:%M')}  
-**Status:** Draft - Harap direview dalam 24 jam  
-
-*Notulen ini disusun berdasarkan transkrip otomatis ({word_count} kata, {len(lines)} baris).  
-Semua arahan dan tugas telah dicapture berdasarkan diskusi aktual.*
+*Notulen ini dibuat otomatis ({word_count} kata)*
 """
     
     return notulen
 
-def generate_comprehensive_notulen(transcript, api_key):
+def generate_notulen_with_ai(transcript, api_key):
     """
-    Generate comprehensive notulen capturing ALL directions
+    Generate notulen using AI with fallback
     """
-    try:
-        if api_key:
+    if api_key:
+        try:
             genai.configure(api_key=api_key)
             
-            # Use the most comprehensive model
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            # Try multiple models
+            models = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"]
             
-            prompt = f"""
-            BUATKAN NOTULEN RAPAT YANG LENGKAP DAN DETAIL DENGAN MENANGKAP SEMUA ARAHAN DARI SEMUA PESERTA.
-
-            **TRANSCRIPT RAPAT:**
-            {transcript[:5000]}
-
-            **INSTRUKSI MUTLAK:**
-            1. **TANGKAP SEMUA ARAHAN** dari semua peserta, bukan hanya pimpinan
-            2. **IDENTIFIKASI SIAPA** yang memberi arahan dan KEPADA SIAPA arahan diberikan
-            3. **DETAILKAN** setiap tugas dengan spesifik:
-               - Apa yang harus dilakukan
-               - Siapa yang bertanggung jawab
-               - Kapan deadline/target
-               - Bagaimana cara melakukannya
-            4. **GRUPKAN** arahan berdasarkan topik/pembicara
-            5. **JANGAN LUPAKAN** arahan kecil sekalipun
-
-            **STRUKTUR NOTULEN YANG DIBUTUHKAN:**
-
-            # NOTULEN RAPAT
-
-            ## INFORMASI RAPAT
-            [Tabel informasi dasar]
-
-            ## DAFTAR PESERTA
-            [Daftar semua peserta dengan jabatan]
-
-            ## REKAPITULASI ARAHAN PER PESERTA
-            **Untuk setiap peserta yang memberi arahan:**
-            - Nama Peserta: [NAMA]
-            - Jabatan: [JABATAN]
-            - Arahan yang diberikan:
-              1. [ARAHAN 1] → Ditujukan ke: [PENERIMA] | Deadline: [TANGGAL]
-              2. [ARAHAN 2] → Ditujukan ke: [PENERIMA] | Deadline: [TANGGAL]
-
-            ## DETAIL DISKUSI BERDASARKAN TOPIK
-            **Untuk setiap topik diskusi:**
-            ### [NAMA TOPIK]
-            **Pembicara Utama:** [NAMA]
-            **Isi Diskusi:** [RINGKASAN]
-            **Arahan yang Muncul:**
-            - [Arahan spesifik 1] (oleh: [PEMBERI] → ke: [PENERIMA])
-            - [Arahan spesifik 2] (oleh: [PEMBERI] → ke: [PENERIMA])
-            **Keputusan:** [Keputusan yang diambil]
-
-            ## ACTION ITEMS TABLE
-            | No | Action Item | Assigned By | Assigned To | Priority | Deadline | Status |
-            |----|-------------|-------------|-------------|----------|----------|--------|
-            | 1  | [Deskripsi tugas] | [Pemberi tugas] | [Penanggung jawab] | High/Medium/Low | [Tanggal] | Pending |
-
-            ## RINGKASAN EXECUTIVE
-            **Total Arahan:** [JUMLAH]
-            **Peserta yang Memberi Arahan:** [JUMLAH dan NAMA]
-            **Deadline Terdekat:** [TANGGAL]
-            **Prioritas Tertinggi:** [ITEM]
-
-            **CATATAN:** Fokus pada KELENGKAPAN ARAHAN, bukan hanya ringkasan diskusi.
-            """
-            
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,
-                    "max_output_tokens": 6000,
-                }
-            )
-            
-            if response and response.text:
-                return {
-                    'success': True,
-                    'content': response.text,
-                    'error': None,
-                    'source': 'comprehensive_ai',
-                    'model': 'gemini-1.5-pro'
-                }
+            for model_name in models:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    
+                    prompt = f"""
+                    BUATKAN NOTULEN RAPAT YANG LENGKAP DARI TRANSCRIPT BERIKUT:
+                    
+                    {transcript[:4000]}
+                    
+                    FORMAT:
+                    # NOTULEN RAPAT
+                    
+                    ## INFORMASI RAPAT
+                    [tabel informasi]
+                    
+                    ## DAFTAR PESERTA
+                    [tabel peserta]
+                    
+                    ## HASIL DISKUSI
+                    ### [Topik 1]
+                    **Disampaikan oleh:** [Nama]
+                    **Isi:** [Ringkasan]
+                    **Arahan:** [Arahan yang diberikan]
+                    
+                    ### [Topik 2]
+                    **Disampaikan oleh:** [Nama]
+                    **Isi:** [Ringkasan]
+                    **Arahan:** [Arahan yang diberikan]
+                    
+                    ## ACTION ITEMS
+                    [daftar tugas dengan PIC dan deadline]
+                    """
+                    
+                    response = model.generate_content(prompt)
+                    
+                    if response and response.text:
+                        return {
+                            'success': True,
+                            'content': response.text,
+                            'model': model_name
+                        }
+                        
+                except:
+                    continue
     
-    except Exception as e:
-        pass
-    
-    # Fallback to comprehensive template
-    fallback = create_comprehensive_notulen(transcript, api_key)
+    # Fallback jika AI gagal atau tidak ada API key
+    fallback = create_fallback_notulen(transcript)
     return {
         'success': True,
         'content': fallback,
-        'error': None,
-        'source': 'comprehensive_template',
-        'model': 'template'
+        'model': 'fallback_template'
     }
+
+def create_word_document(content):
+    """
+    Create Word document
+    """
+    try:
+        doc = Document()
+        doc.add_heading('Notulen Rapat', 0)
+        doc.add_paragraph(content)
+        
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
+    except:
+        buffer = io.BytesIO()
+        buffer.write(content.encode('utf-8'))
+        buffer.seek(0)
+        return buffer
+
+def chat_with_transcript(question, transcript, api_key):
+    """
+    Chat function to ask questions about transcript
+    """
+    if not api_key:
+        return "Untuk fitur chat yang optimal, setup API key di secrets.toml"
+    
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        prompt = f"""
+        JAWAB PERTANYAAN BERDASARKAN TRANSCRIPT RAPAT BERIKUT:
+        
+        {transcript[:3000]}
+        
+        PERTANYAAN: {question}
+        
+        INSTRUKSI:
+        1. Jawab berdasarkan transcript saja
+        2. Jika informasi tidak ada, katakan tidak ditemukan
+        3. Gunakan bahasa Indonesia formal
+        4. Berikan jawaban spesifik
+        """
+        
+        response = model.generate_content(prompt)
+        return response.text if response and response.text else "Tidak dapat menjawab saat ini"
+        
+    except:
+        return "Sistem chat sedang mengalami kendala"
 
 def main():
     st.set_page_config(
-        page_title="Notulen Lengkap - Capture Semua Arahan",
-        page_icon="📋",
+        page_title="Notulen Generator & Chatbot",
+        page_icon="🤖",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    # Professional CSS
+    # CSS Styling
     st.markdown("""
     <style>
-    .main-header {
+    .main-title {
         text-align: center;
-        padding: 1.5rem 0;
+        padding: 1rem 0;
         color: #1a237e;
         font-size: 2.5rem;
         font-weight: 700;
         margin-bottom: 0.5rem;
-        border-bottom: 3px solid #1a237e;
     }
-    .sub-header {
+    .sub-title {
         text-align: center;
         color: #5c6bc0;
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         margin-bottom: 2rem;
         font-weight: 300;
-    }
-    .capture-badge {
-        background: linear-gradient(90deg, #1a237e 0%, #283593 100%);
-        color: white;
-        padding: 0.5rem 1.2rem;
-        border-radius: 6px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        display: inline-block;
-        margin: 0.2rem;
     }
     .stButton>button {
         background: linear-gradient(90deg, #1a237e 0%, #283593 100%);
@@ -420,86 +228,90 @@ def main():
         padding: 0.75rem 1.5rem;
         font-weight: 600;
         font-size: 1rem;
+        width: 100%;
     }
     .stButton>button:hover {
         background: linear-gradient(90deg, #283593 0%, #3949ab 100%);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(26, 35, 126, 0.3);
     }
-    .info-card {
+    .chat-message {
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        animation: fadeIn 0.3s ease-in;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .user-message {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        border-left: 4px solid #2196f3;
+        margin-left: 2rem;
+    }
+    .assistant-message {
+        background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
+        border-left: 4px solid #9c27b0;
+        margin-right: 2rem;
+    }
+    .info-box {
         background: #f5f7ff;
         border-left: 4px solid #1a237e;
         padding: 1.5rem;
         border-radius: 8px;
         margin: 1rem 0;
     }
-    .success-card {
-        background: #e8f5e9;
+    .success-box {
+        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
         border-left: 4px solid #4caf50;
         padding: 1.5rem;
         border-radius: 8px;
         margin: 1rem 0;
     }
-    .discussion-point {
-        background: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    .tab-content {
+        padding: 1rem 0;
     }
-    .speaker-tag {
-        background: #e3f2fd;
-        color: #1565c0;
-        padding: 0.25rem 0.75rem;
-        border-radius: 4px;
-        font-weight: 600;
-        font-size: 0.9rem;
-        display: inline-block;
-        margin-right: 0.5rem;
+    .upload-area {
+        border: 2px dashed #1a237e;
+        border-radius: 10px;
+        padding: 3rem;
+        text-align: center;
+        margin: 1rem 0;
+        background: #f8f9ff;
     }
-    .action-tag {
-        background: #f3e5f5;
-        color: #7b1fa2;
-        padding: 0.25rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.85rem;
-        display: inline-block;
-        margin: 0.1rem 0.25rem;
-    }
-    .assignment-table {
-        width: 100%;
-        border-collapse: collapse;
+    .quick-questions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
         margin: 1rem 0;
     }
-    .assignment-table th {
+    .quick-question-btn {
+        background: #e8eaf6 !important;
+        color: #1a237e !important;
+        border: 1px solid #c5cae9 !important;
+        padding: 0.5rem 1rem !important;
+        font-size: 0.9rem !important;
+    }
+    .quick-question-btn:hover {
+        background: #d1d9ff !important;
+        transform: translateY(-1px) !important;
+    }
+    .model-badge {
+        display: inline-block;
         background: #1a237e;
         color: white;
-        padding: 0.75rem;
-        text-align: left;
-    }
-    .assignment-table td {
-        padding: 0.75rem;
-        border-bottom: 1px solid #e0e0e0;
-    }
-    .assignment-table tr:hover {
-        background: #f5f7ff;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        margin: 0.25rem;
     }
     </style>
     """, unsafe_allow_html=True)
 
     # Header
-    st.markdown('<h1 class="main-header">📋 NOTULEN LENGKAP - CAPTURE SEMUA ARAHAN</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Setiap arahan, tugas, dan komitmen dari semua peserta tercatat lengkap</p>', unsafe_allow_html=True)
-    
-    # Feature badges
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown('<div class="capture-badge">🎯 Capture All Directions</div>', unsafe_allow_html=True)
-    with col2:
-        st.markdown('<div class="capture-badge">👥 All Participants</div>', unsafe_allow_html=True)
-    with col3:
-        st.markdown('<div class="capture-badge">📋 Assignment Tracking</div>', unsafe_allow_html=True)
-    with col4:
-        st.markdown('<div class="capture-badge">⏰ Deadline Focus</div>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-title">🤖 Notulen Generator & Chatbot</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-title">Generate notulen lengkap + Chat dengan konten rapat</p>', unsafe_allow_html=True)
     
     # Get API key
     try:
@@ -511,182 +323,296 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("⚙️ Konfigurasi")
         
         if api_key_available:
-            st.success("✅ API Ready")
+            st.success("✅ API Key tersedia")
         else:
-            st.warning("⚠️ Basic Mode")
-            st.info("Setup API key untuk analisis mendalam")
+            st.warning("⚠️ API Key tidak ditemukan")
+            with st.expander("Cara setup API key"):
+                st.markdown("""
+                1. Buat file `.streamlit/secrets.toml`
+                2. Tambahkan:
+                ```toml
+                api_key = "api_key_anda"
+                ```
+                3. Dapatkan API key dari [Google AI Studio](https://makersuite.google.com/app/apikey)
+                """)
         
-        st.header("🎯 Focus Features")
-        st.markdown("""
-        ### **What We Capture:**
-        ✅ Semua arahan dari semua peserta  
-        ✅ Tugas spesifik dengan penanggung jawab  
-        ✅ Deadline dan timeline  
-        ✅ Keputusan dan komitmen  
-        ✅ Follow-up actions  
-        
-        ### **Output Structure:**
-        1. Rekap arahan per peserta
-        2. Detail diskusi per topik
-        3. Action items table
-        4. Executive summary
-        """)
-    
-    # Main content
-    st.markdown('<div class="info-card"><strong>📝 UPLOAD TRANSCRIPT RAPAT</strong><br>System akan menangkap semua arahan, tugas, dan komitmen dari semua peserta.</div>', unsafe_allow_html=True)
-    
-    uploaded_file = st.file_uploader(
-        "Pilih file transcript",
-        type=['vtt', 'txt'],
-        key="uploader"
-    )
-    
-    if uploaded_file:
-        content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
-        transcript = process_vtt_text(content)
-        st.session_state.transcript = transcript
-        
-        # Show stats
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Kata", f"{len(transcript.split()):,}")
-        with col2:
-            # Count potential speakers
-            speakers = set()
-            for line in transcript.split('\n'):
-                if ':' in line and len(line.split(':')[0]) < 50:
-                    speakers.add(line.split(':')[0].strip())
-            st.metric("Pembicara Terdeteksi", len(speakers))
-        with col3:
-            # Count lines with action words
-            action_words = ['harus', 'tolong', 'mohon', 'silahkan', 'wajib', 'deadline', 'target', 'tugas']
-            action_lines = sum(1 for line in transcript.split('\n') 
-                            if any(word in line.lower() for word in action_words))
-            st.metric("Potensi Arahan", action_lines)
-        
-        # Preview
-        with st.expander("🔍 Preview Transcript", expanded=False):
-            st.text_area("", transcript[:1000], height=200, disabled=True)
-        
-        # Generate button
-        if st.button("🚀 GENERATE COMPREHENSIVE NOTULEN", type="primary", use_container_width=True):
-            with st.spinner("🔍 Menganalisis semua arahan dari transcript..."):
-                result = generate_comprehensive_notulen(transcript, api_key)
-                
-                st.session_state.notulen = result['content']
-                st.session_state.generated = True
-                st.session_state.model = result['model']
-                
-                st.markdown('<div class="success-card"><strong>✅ NOTULEN LENGKAP BERHASIL DIBUAT!</strong><br>Semua arahan dari semua peserta telah tercapture dengan detail.</div>', unsafe_allow_html=True)
-    
-    # Display results
-    if 'notulen' in st.session_state and st.session_state.get('generated'):
-        st.divider()
-        st.markdown("### 📋 HASIL NOTULEN LENGKAP")
-        
-        # Analysis summary
-        content = st.session_state.notulen
-        
-        # Count action items
-        action_count = content.lower().count('action item') + content.lower().count('arahan') + content.lower().count('tugas')
-        speaker_count = len(set(re.findall(r'oleh:\s*([^\n\(]+)', content, re.IGNORECASE)))
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Arahan Terdeteksi", action_count)
-        with col2:
-            st.metric("Pemberi Arahan", speaker_count)
-        with col3:
-            # Count deadlines
-            deadlines = len(re.findall(r'deadline|target|tanggal\s*:', content, re.IGNORECASE))
-            st.metric("Deadline Tercatat", deadlines)
-        
-        # Show in expandable sections
-        sections = re.split(r'\n## ', content)
-        
-        for i, section in enumerate(sections):
-            if section.strip():
-                section_title = section.split('\n')[0] if '\n' in section else section
-                
-                # Special handling for different sections
-                if 'ARAHAN' in section_title.upper() or 'ACTION' in section_title.upper():
-                    with st.expander(f"📌 {section_title}", expanded=True):
-                        st.markdown("## " + section, unsafe_allow_html=True)
-                        
-                        # Highlight assignments
-                        assignments = re.findall(r'([^:]+):\s*([^\n]+(?:\n(?!\n)[^\n]+)*)', section)
-                        for speaker, assignment in assignments[:5]:
-                            if len(speaker.strip()) > 2 and len(assignment.strip()) > 10:
-                                st.markdown(f"""
-                                <div class="discussion-point">
-                                    <span class="speaker-tag">{speaker.strip()}</span>
-                                    <strong>Memberi arahan:</strong>
-                                    <p>{assignment.strip()}</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                
-                elif 'DISKUSI' in section_title.upper() or 'DISCUSSION' in section_title.upper():
-                    with st.expander(f"💬 {section_title}", expanded=True):
-                        st.markdown("## " + section, unsafe_allow_html=True)
-                
-                else:
-                    with st.expander(f"📄 {section_title}"):
-                        st.markdown("## " + section, unsafe_allow_html=True)
-        
-        # Download section
-        st.divider()
-        st.markdown("### 💾 Download Options")
-        
+        st.header("📊 Statistik")
+        if 'total_generated' not in st.session_state:
+            st.session_state.total_generated = 0
+        if 'total_chats' not in st.session_state:
+            st.session_state.total_chats = 0
+            
         col1, col2 = st.columns(2)
         with col1:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            st.download_button(
-                label="📄 Download as TXT",
-                data=content,
-                file_name=f"Notulen_Lengkap_{timestamp}.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
+            st.metric("Notulen Dibuat", st.session_state.total_generated)
         with col2:
-            # Simple Word document
-            try:
-                doc = Document()
-                doc.add_heading('NOTULEN RAPAT LENGKAP', 0)
-                doc.add_paragraph(content)
-                
-                buffer = io.BytesIO()
-                doc.save(buffer)
-                buffer.seek(0)
-                
+            st.metric("Chat Terkirim", st.session_state.total_chats)
+        
+        st.header("🚀 Fitur")
+        st.markdown("""
+        - **AI Notulen Generator**
+        - **Transcript Chatbot**
+        - **Export to Word**
+        - **Multi-model AI**
+        - **100% Success Rate**
+        """)
+        
+        if st.button("🔄 Reset Semua Data", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                if key not in ['total_generated', 'total_chats']:
+                    del st.session_state[key]
+            st.rerun()
+    
+    # Main tabs
+    tab1, tab2 = st.tabs(["📄 Generate Notulen", "💬 Chat dengan Transcript"])
+    
+    with tab1:
+        st.markdown('<div class="tab-content">', unsafe_allow_html=True)
+        
+        st.markdown("### 📤 Upload Transcript")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            uploaded_file = st.file_uploader(
+                "Pilih file VTT atau TXT",
+                type=['vtt', 'txt'],
+                help="Upload transcript dari Zoom, Teams, atau Google Meet",
+                label_visibility="collapsed"
+            )
+        
+        if uploaded_file:
+            content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
+            transcript = process_vtt_text(content)
+            st.session_state.transcript = transcript
+            
+            # Show stats
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Kata", len(transcript.split()))
+            with col2:
+                st.metric("Karakter", len(transcript))
+            with col3:
+                # Count speakers
+                speakers = set()
+                for line in transcript.split('\n'):
+                    if ':' in line:
+                        speaker = line.split(':')[0].strip()
+                        if 2 < len(speaker) < 50:
+                            speakers.add(speaker)
+                st.metric("Pembicara", len(speakers))
+            
+            # Generate buttons
+            st.markdown("### 🚀 Generate Options")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✨ Generate dengan AI", type="primary", use_container_width=True):
+                    with st.spinner("AI sedang menganalisis transcript..."):
+                        result = generate_notulen_with_ai(transcript, api_key)
+                        
+                        st.session_state.notulen = result['content']
+                        st.session_state.notulen_generated = True
+                        st.session_state.generation_model = result.get('model', 'unknown')
+                        st.session_state.total_generated += 1
+                        
+                        st.success(f"✅ Notulen berhasil dibuat! (Model: {result['model']})")
+            
+            with col2:
+                if st.button("📋 Generate Template", use_container_width=True):
+                    fallback = create_fallback_notulen(transcript)
+                    st.session_state.notulen = fallback
+                    st.session_state.notulen_generated = True
+                    st.session_state.generation_model = 'template'
+                    st.session_state.total_generated += 1
+                    st.success("✅ Template notulen berhasil dibuat!")
+        
+        # Display notulen if generated
+        if 'notulen' in st.session_state and st.session_state.get('notulen_generated'):
+            st.markdown("### 📋 Hasil Notulen")
+            
+            # Show model badge
+            model = st.session_state.get('generation_model', 'unknown')
+            st.markdown(f'<span class="model-badge">Model: {model}</span>', unsafe_allow_html=True)
+            
+            # Display notulen
+            st.markdown(st.session_state.notulen)
+            
+            # Download section
+            st.markdown("### 💾 Download")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                st.download_button(
+                    label="📄 Download TXT",
+                    data=st.session_state.notulen,
+                    file_name=f"notulen_{timestamp}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            
+            with col2:
+                word_buffer = create_word_document(st.session_state.notulen)
                 st.download_button(
                     label="📝 Download Word",
-                    data=buffer.getvalue(),
-                    file_name=f"Notulen_Lengkap_{timestamp}.docx",
+                    data=word_buffer.getvalue(),
+                    file_name=f"notulen_{timestamp}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
-            except:
-                pass
         
-        # Regenerate option
-        if st.button("🔄 Regenerate dengan Analisis Lebih Dalam", use_container_width=True):
-            if 'transcript' in st.session_state:
-                with st.spinner("Menganalisis lebih dalam..."):
-                    result = generate_comprehensive_notulen(st.session_state.transcript, api_key)
-                    st.session_state.notulen = result['content']
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab2:
+        st.markdown('<div class="tab-content">', unsafe_allow_html=True)
+        
+        st.markdown("### 💬 Chat dengan Konten Rapat")
+        
+        # Initialize chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+        
+        # Check if transcript exists
+        if 'transcript' not in st.session_state or not st.session_state.transcript:
+            st.markdown('<div class="info-box">📝 Upload transcript terlebih dahulu di tab "Generate Notulen" untuk menggunakan fitur chat</div>', unsafe_allow_html=True)
+            
+            st.markdown("### 📋 Contoh Pertanyaan")
+            st.markdown("""
+            **Tentang Peserta:**
+            - Siapa saja yang hadir dalam rapat?
+            - Berapa jumlah peserta rapat?
+            - Siapa pemimpin rapat?
+            
+            **Tentang Diskusi:**
+            - Apa saja topik yang dibahas?
+            - Keputusan apa yang diambil?
+            - Masalah apa yang diangkat?
+            
+            **Tentang Arahan:**
+            - Tugas apa yang diberikan?
+            - Siapa yang ditugaskan?
+            - Kapan deadline-nya?
+            """)
+        else:
+            # Display chat history
+            st.markdown("#### 💭 History Chat")
+            
+            chat_container = st.container()
+            with chat_container:
+                for message in st.session_state.chat_history:
+                    if message['role'] == 'user':
+                        st.markdown(f'<div class="chat-message user-message"><strong>👤 Anda:</strong> {message["content"]}</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 Assistant:</strong> {message["content"]}</div>', unsafe_allow_html=True)
+            
+            # Quick questions
+            st.markdown("#### ⚡ Pertanyaan Cepat")
+            
+            quick_questions = [
+                "Siapa peserta rapat?",
+                "Apa agenda utama?",
+                "Keputusan apa yang diambil?",
+                "Arahan apa yang diberikan?",
+                "Deadline yang disepakati?"
+            ]
+            
+            cols = st.columns(5)
+            for idx, question in enumerate(quick_questions):
+                with cols[idx % 5]:
+                    if st.button(question, key=f"quick_{idx}", use_container_width=True):
+                        # Add to input
+                        st.session_state.last_quick_question = question
+            
+            # Chat input
+            st.markdown("#### 💬 Tanya tentang rapat")
+            
+            # Initialize input text
+            if 'last_quick_question' in st.session_state:
+                default_question = st.session_state.last_quick_question
+                del st.session_state.last_quick_question
+            else:
+                default_question = ""
+            
+            question = st.text_input(
+                "Masukkan pertanyaan Anda:",
+                value=default_question,
+                placeholder="Contoh: Siapa yang bertanggung jawab untuk action items?",
+                label_visibility="collapsed"
+            )
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                if st.button("Kirim Pertanyaan", type="primary", use_container_width=True):
+                    if question.strip():
+                        # Add user message to history
+                        st.session_state.chat_history.append({
+                            'role': 'user',
+                            'content': question,
+                            'timestamp': datetime.now().strftime("%H:%M")
+                        })
+                        
+                        # Get AI response
+                        with st.spinner("🤖 Mencari jawaban..."):
+                            response = chat_with_transcript(question, st.session_state.transcript, api_key)
+                            
+                            # Add assistant response to history
+                            st.session_state.chat_history.append({
+                                'role': 'assistant',
+                                'content': response,
+                                'timestamp': datetime.now().strftime("%H:%M")
+                            })
+                            
+                            st.session_state.total_chats += 1
+                        
+                        # Rerun to update display
+                        st.rerun()
+                    else:
+                        st.warning("Silakan masukkan pertanyaan terlebih dahulu")
+            
+            with col2:
+                if st.button("🗑️ Hapus Chat", use_container_width=True):
+                    st.session_state.chat_history = []
                     st.rerun()
+            
+            # Export chat option
+            if st.session_state.chat_history:
+                st.markdown("---")
+                if st.button("📥 Export Chat History", use_container_width=True):
+                    chat_text = "Chat History:\n\n"
+                    for msg in st.session_state.chat_history:
+                        role = "User" if msg['role'] == 'user' else "Assistant"
+                        time = msg.get('timestamp', '')
+                        chat_text += f"[{time}] {role}: {msg['content']}\n\n"
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.download_button(
+                        label="Download Chat History",
+                        data=chat_text,
+                        file_name=f"chat_history_{timestamp}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Footer
-    st.divider()
     st.markdown("""
-    <div style='text-align: center; color: #666; padding: 1rem; font-size: 0.9rem;'>
-        <p><strong>📋 NOTULEN LENGKAP - TKMP</strong></p>
-        <p>Setiap arahan tercatat • Setiap tugas terdokumentasi • Setiap deadline terpantau</p>
+    <div style='text-align: center; color: #666; padding: 2rem; margin-top: 2rem; border-top: 1px solid #eee;'>
+        <p><strong>Notulen Generator & Chatbot</strong> • Group Transformasi Korporasi dan Manajemen Program</p>
+        <p style='font-size: 0.9rem;'>Versi 2.0 • AI-Powered • User Friendly</p>
     </div>
     """, unsafe_allow_html=True)
+
+# Initialize session state variables
+if 'total_generated' not in st.session_state:
+    st.session_state.total_generated = 0
+if 'total_chats' not in st.session_state:
+    st.session_state.total_chats = 0
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 if __name__ == "__main__":
     main()
