@@ -1,939 +1,601 @@
-import streamlit as st
-import re
-from datetime import datetime
-import io
-import google.generativeai as genai
-from docx import Document
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-def process_vtt_text(vtt_text):
-    """
-    Process VTT text to clean timestamps and metadata
-    """
-    # Clean timestamp & metadata
-    cleaned_text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3} --> .*", "", vtt_text)
-    cleaned_text = re.sub(r"WEBVTT.*\n", "", cleaned_text)
-    cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
-    return cleaned_text
+**INSTRUKSI MUTLAK:**
+1. **EKSTRAK SEMUA NAMA** yang disebutkan dalam transkrip
+2. **IDENTIFIKASI JABATAN** masing-masing (Direktur Utama, Komisaris, Manajer, dll)
+3. **PRIORITASKAN NAMA:**
+   - "Jatna" → harus muncul sebagai "Jatna (Direktur Utama)"
+   - Cari kata kunci: Dirut, Komisaris, Presdir, GM, Mgr
+4. **JANGAN ABAIKAN** informasi nama sekecil apapun
+5. **GUNAKAN NAMA ASLI** dari transkrip, jangan ganti dengan [nama]
 
-def extract_important_names_and_positions(transcript):
-    """
-    Extract important names and positions from transcript with enhanced detection
-    """
-    # Common Indonesian executive titles and patterns
-    executive_patterns = [
-        # Director level
-        (r'(Direktur Utama|Dirut)', 'Direktur Utama'),
-        (r'(Direktur|Dir)', 'Direktur'),
-        (r'(Komisaris|Komisaris Utama)', 'Komisaris'),
-        (r'(Presiden Direktur|Presdir)', 'Presiden Direktur'),
-        
-        # Manager level
-        (r'(General Manager|GM)', 'General Manager'),
-        (r'(Manajer|Mgr)', 'Manajer'),
-        (r'(Kepala|Head of)', 'Kepala Divisi'),
-        
-        # Department heads
-        (r'(Chief|CTO|CIO|CFO|COO)', 'Chief Officer'),
-        
-        # Specific names to look for
-        (r'\b(Jatna)\b', 'Direktur Utama'),
-        (r'\b(Budi|Agus|Sari|Ahmad|Dewi)\b', 'Manager'),  # Common Indonesian names
-    ]
-    
-    lines = transcript.split('\n')
-    detected_people = {}
-    
-    for line in lines:
-        line_lower = line.lower()
-        
-        # Check for speaker patterns (name followed by colon)
-        if ':' in line:
-            speaker_part = line.split(':')[0].strip()
-            if len(speaker_part) > 2 and len(speaker_part) < 50:
-                # Clean the speaker name
-                speaker = re.sub(r'\([^)]*\)', '', speaker_part).strip()
-                
-                # Check for titles in the speaker name
-                title = None
-                for pattern, title_name in executive_patterns:
-                    if re.search(pattern, speaker, re.IGNORECASE):
-                        title = title_name
-                        break
-                
-                # If no title found, check the line content for titles
-                if not title:
-                    for pattern, title_name in executive_patterns:
-                        if re.search(pattern, line_lower):
-                            title = title_name
-                            break
-                
-                detected_people[speaker] = title or 'Peserta Rapat'
-    
-    return detected_people
-
-def create_enhanced_fallback_notulen(transcript):
-    """
-    Create enhanced fallback notulen with intelligent name extraction
-    """
-    now = datetime.now()
-    
-    # Extract important names and positions
-    detected_people = extract_important_names_and_positions(transcript)
-    
-    # Count words
-    word_count = len(transcript.split())
-    
-    # Determine meeting leader (prioritize executives)
-    meeting_leader = "Pimpinan Rapat"
-    for name, title in detected_people.items():
-        if any(exec_title in title for exec_title in ['Direktur Utama', 'Komisaris', 'Presiden', 'Chief']):
-            meeting_leader = f"{name} ({title})"
-            break
-    
-    # Create enhanced notulen
-    enhanced_notulen = f"""# Notulen Rapat
-
-|Nama Rapat|Rapat Koordinasi Manajemen|
-|---|---|
-|Hari/Tanggal|{now.strftime('%A, %d %B %Y')}|
-|Waktu|{now.strftime('%H:%M')} - Selesai WIB|
-|Tempat|Ruang Rapat Utama|
-|Pemimpin Rapat|{meeting_leader}|
-|Dibuat oleh|[Group Transformasi Korporasi dan Manajemen Program]|
-
-**Agenda:**
-- Pembukaan dan pengarahan
-- Laporan progress divisi
-- Pembahasan kendala dan solusi
-- Koordinasi antar departemen
-- Penetapan keputusan dan tindak lanjut
-- Penutupan
-
-**Peserta Rapat:**
-|No||Nama/Jabatan|
-|---|---|---|
-"""
-    
-    # Add participants with their titles
-    if detected_people:
-        for i, (name, title) in enumerate(detected_people.items(), 1):
-            if i <= 15:  # Limit to 15 participants
-                enhanced_notulen += f"|{i}||{name} ({title})|\n"
-    else:
-        # Fallback participants
-        fallback_participants = [
-            ("Direktur Utama", "Direktur Utama"),
-            ("Komisaris", "Komisaris"),
-            ("Manajer Keuangan", "Manager"),
-            ("Manajer Operasional", "Manager"),
-            ("Tim Transformasi", "Staff")
-        ]
-        for i, (name, title) in enumerate(fallback_participants, 1):
-            enhanced_notulen += f"|{i}||{name} ({title})|\n"
-    
-    enhanced_notulen += """
-|Poin Diskusi dan Arahan|Penanggung Jawab|
-|---|---|
-|**1. Pembukaan dan Arahan Pimpinan**||
-Pembukaan rapat oleh pimpinan dengan arahan strategis untuk periode mendatang.
-|Kesimpulan :||
-|• Arahan strategis telah disampaikan untuk menjadi acuan kerja|{meeting_leader}|
-|**2. Laporan Progress Divisi**||
-Setiap divisi melaporkan progress kerja, pencapaian target, dan kendala yang dihadapi.
-|Kesimpulan :||
-|• Progress divisi telah dipresentasikan dan didiskusikan|Manajer Divisi|
-|**3. Pembahasan Kendala Operasional**||
-Diskusi mendalam mengenai kendala teknis dan operasional yang menghambat pencapaian target.
-|Kesimpulan :||
-|• Disepakati solusi untuk setiap kendala yang dihadapi|Tim Teknis|
-|**4. Koordinasi Antar Departemen**||
-Koordinasi kerja antar departemen untuk optimalisasi proses dan efisiensi.
-|Kesimpulan :||
-|• Akan dibuat SOP koordinasi antar departemen|Manajer Operasional|
-|**5. Rencana Tindak Lanjut**||
-Penyusunan action plan dengan timeline dan penanggung jawab yang jelas.
-|Kesimpulan :||
-|• Timeline dan penanggung jawab telah ditetapkan|Semua Peserta|
-
-**Keputusan Penting:**
-1. Penyusunan rencana aksi detail untuk setiap divisi
-2. Evaluasi progress dilakukan setiap minggu
-3. Pelaporan rutin kepada manajemen puncak
-
-**Target dan Timeline:**
-- Penyelesaian action plan: {datetime.now().strftime('%d %B %Y')}
-- Review progress berikutnya: {datetime.now().strftime('%A, %d %B %Y')}
-
-**Disclaimer:**
-_Jika tidak ada tanggapan dalam tiga hari sejak dokumen ini didistribusikan, maka dokumen ini dianggap final._
-
----
-*Notulen ini dibuat secara otomatis berdasarkan transkrip rapat ({word_count} kata).*
-*Silakan lengkapi informasi yang diperlukan sesuai dengan diskusi aktual.*
-"""
-    
-    return enhanced_notulen
-
-def generate_notulen_with_enhanced_ai(sentences, api_key):
-    """
-    Generate formal meeting minutes using Google Gemini API with enhanced name recognition
-    """
-    # Try AI generation first if API key is available
-    if api_key:
-        try:
-            # Configure API
-            genai.configure(api_key=api_key)
-            
-            # Try multiple models in sequence for best performance
-            models_to_try = [
-                "models/gemini-1.5-flash-001",  # Latest stable version
-                "models/gemini-1.5-flash",
-                "models/gemini-pro",
-                "models/gemini-flash-latest"
-            ]
-            
-            for model_name in models_to_try:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    
-                    # ENHANCED PROMPT with specific instructions for name recognition
-                    prompt = f"""
-**TUGAS: BUAT NOTULEN RAPAT PROFESIONAL DENGAN BAHASA INDONESIA FORMAL**
-
-**INSTRUKSI KHUSUS:**
-1. EKSTRAK DAN IDENTIFIKASI SEMUA NAMA DAN JABATAN dari transkrip
-2. UTAMAKAN PENGGUNAAN NAMA ASLI dari transkrip (Jatna, Budi, Agus, Sari, dll)
-3. KENALI JABATAN PENTING: Direktur Utama, Komisaris, Manajer, Kepala Divisi
-4. JIKA NAMA TIDAK JELAS, gunakan jabatan sebagai referensi
-
-**TRANSCRIPT RAPAT:**
-{sentences[:4000]}
-
-**FORMAT OUTPUT YANG DIMINTA:**
+**FORMAT OUTPUT Wajib mengikuti STRUKTUR INI:**
 
 # Notulen Rapat
 
-|Nama Rapat|[nama rapat berdasarkan transkrip]|
+|Nama Rapat|[Ekstrak nama rapat dari transcript]|
 |---|---|
-|Hari/Tanggal|[hari, tanggal dari transkrip]|
-|Waktu|[waktu rapat dari transkrip]|
-|Tempat|[lokasi rapat dari transkrip]|
+|Hari/Tanggal|[Ekstrak tanggal dari transcript atau gunakan hari ini]|
+|Waktu|[Ekstrak waktu dari transcript]|
+|Tempat|[Lokasi rapat dari transcript]|
 |Pemimpin Rapat|[NAMA LENGKAP dengan jabatan]|
 |Dibuat oleh|[Group Transformasi Korporasi dan Manajemen Program]|
 
 **Agenda:**
-- [agenda 1]
-- [agenda 2]
+- [Poin agenda 1]
+- [Poin agenda 2]
 - [dan seterusnya]
 
 **Peserta Rapat:**
 |No||Nama/Jabatan|
 |---|---|---|
-|1|[NAMA LENGKAP] ([JABATAN])|
-|2|[NAMA LENGKAP] ([JABATAN])|
-|[lanjutkan sesuai peserta yang terdeteksi]|
-
-**POIN DISKUSI DAN ARAHAN:**
+|1|[NAMA_PESERTA_1] ([JABATAN_1])|
+|2|[NAMA_PESERTA_2] ([JABATAN_2])|
+|[lanjutkan dengan semua peserta yang terdeteksi]|
 
 |Poin Diskusi dan Arahan|Penanggung Jawab|
 |---|---|
-|**[Topik Diskusi 1]**||
-[Penjelasan singkat tentang topik]
+|**[Topik Diskusi 1: ekstrak dari transcript]**||
+[Ringkasan pembahasan 3-4 kalimat]
 |Kesimpulan :||
-|• [kesimpulan 1]|[NAMA Penanggung Jawab]|
-|• [kesimpulan 2]|[NAMA Penanggung Jawab]|
+|• [Kesimpulan 1]|[NAMA_PENANGGUNGJAWAB]|
+|• [Kesimpulan 2]|[NAMA_PENANGGUNGJAWAB]|
 |**[Topik Diskusi 2]**||
-[Penjelasan singkat tentang topik]
+[Ringkasan pembahasan 3-4 kalimat]
 |Kesimpulan :||
-|• [kesimpulan 1]|[NAMA Penanggung Jawab]|
+|• [Kesimpulan 1]|[NAMA_PENANGGUNGJAWAB]|
+|• [Kesimpulan 2]|[NAMA_PENANGGUNGJAWAB]|
+|[Tambahkan topik lain sesuai transcript]|
 
-**CATATAN TAMBAHAN:**
-- Pastikan semua nama ditulis lengkap dan benar
-- Jika ada Direktur Utama/Komisaris, prioritaskan sebagai pemimpin rapat
-- Gunakan format "[Nama] ([Jabatan])" untuk peserta
-- Kolom "Penanggung Jawab" harus berisi NAMA, bukan hanya jabatan
+**Action Items:**
+1. [Tindakan 1] - PIC: [NAMA] - Deadline: [Tanggal]
+2. [Tindakan 2] - PIC: [NAMA] - Deadline: [Tanggal]
 
-**JIKA INFORMASI TIDAK TERSEDIA DALAM TRANSCRIPT:**
-- Gunakan "[Informasi tidak tersedia]" untuk data yang tidak ditemukan
-- Tetap buat struktur notulen yang lengkap
+**Catatan Penting:**
+- Pastikan kolom "Penanggung Jawab" selalu diisi dengan NAMA, bukan jabatan
+- Jika ada "Jatna" dalam transkrip, pastikan muncul sebagai penanggung jawab minimal 1 item
+- Untuk peserta: format harus "[Nama Lengkap] ([Jabatan])"
+
+**JIKA TIDAK ADA INFORMASI:**
+- Tanggal/Waktu: gunakan informasi hari ini
+- Peserta: sebut semua nama yang terdeteksi
+- Topik: ekstrak dari percakapan
+
+**HASIL HARUS:** Formal, lengkap, dengan nama-nama spesifik dari transkrip.
 """
-                    
-                    # Optimized generation config for better performance
-                    generation_config = {
-                        "temperature": 0.1,  # Lower temperature for more consistent output
-                        "top_p": 0.95,
-                        "top_k": 40,
-                        "max_output_tokens": 4096,  # Increased for longer transcripts
-                    }
-                    
-                    # Balanced safety settings
-                    safety_settings = [
-                        {
-                            "category": "HARM_CATEGORY_HARASSMENT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_HATE_SPEECH", 
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        },
-                        {
-                            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                            "threshold": "BLOCK_ONLY_HIGH"
-                        }
-                    ]
-                    
-                    # Generate with streaming for better performance
-                    response = model.generate_content(
-                        prompt, 
-                        generation_config=generation_config,
-                        safety_settings=safety_settings
-                    )
-                    
-                    # Process the response
-                    if response and response.text:
-                        content = response.text.strip()
-                        
-                        # Enhanced validation and cleaning
-                        if any(keyword in content for keyword in ['Notulen Rapat', 'Peserta Rapat', 'Agenda:', 'Kesimpulan']):
-                            # Post-process to ensure names are properly formatted
-                            lines = content.split('\n')
-                            processed_content = []
-                            
-                            for line in lines:
-                                # Enhance name recognition in the output
-                                if 'Direktur' in line or 'Komisaris' in line or 'Manajer' in line:
-                                    # Try to ensure names are included with positions
-                                    processed_line = line
-                                    # Add specific formatting for executive names
-                                    if 'Direktur Utama' in line and 'Jatna' in sentences:
-                                        processed_line = line.replace('Direktur Utama', 'Jatna (Direktur Utama)')
-                                    processed_content.append(processed_line)
-                                else:
-                                    processed_content.append(line)
-                            
-                            content = '\n'.join(processed_content)
-                            
-                            return {
-                                'success': True,
-                                'content': content,
-                                'error': None,
-                                'source': 'ai_enhanced',
-                                'model': model_name
-                            }
-                            
-                except Exception as e:
-                    continue  # Try next model
-        
-        except Exception as e:
-            pass  # Fall through to enhanced fallback
-    
-    # Use enhanced fallback if AI fails
-    enhanced_fallback = create_enhanced_fallback_notulen(sentences)
-    return {
-        'success': True,
-        'content': enhanced_fallback,
-        'error': None,
-        'source': 'enhanced_fallback',
-        'model': 'intelligent_template'
-    }
-
-def create_enhanced_word_document(content, filename):
-    """
-    Create an enhanced Word document with better formatting
-    """
-    try:
-        doc = Document()
-        
-        # Set document margins
-        sections = doc.sections
-        for section in sections:
-            section.top_margin = Inches(0.75)
-            section.bottom_margin = Inches(0.75)
-            section.left_margin = Inches(1)
-            section.right_margin = Inches(1)
-        
-        # Add title with styling
-        title = doc.add_heading('NOTULEN RAPAT', level=0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title_run = title.runs[0]
-        title_run.font.size = Pt(18)
-        title_run.font.bold = True
-        title_run.font.name = 'Arial'
-        
-        # Add subtitle
-        subtitle = doc.add_paragraph()
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        subtitle_run = subtitle.add_run('Dokumen Resmi - Group Transformasi Korporasi dan Manajemen Program')
-        subtitle_run.font.size = Pt(10)
-        subtitle_run.italic = True
-        
-        doc.add_paragraph()  # Add spacing
-        
-        # Process content with basic formatting
-        lines = content.split('\n')
-        
-        for line in lines:
-            if line.startswith('# '):
-                continue  # Skip main title (already added)
-            elif line.startswith('## '):
-                # Section heading
-                heading = doc.add_heading(line.replace('## ', ''), level=1)
-                heading_run = heading.runs[0]
-                heading_run.font.size = Pt(14)
-                heading_run.font.bold = True
-            elif line.startswith('### '):
-                # Subsection heading
-                subheading = doc.add_heading(line.replace('### ', ''), level=2)
-                subheading_run = subheading.runs[0]
-                subheading_run.font.size = Pt(12)
-                subheading_run.font.bold = True
-            elif line.strip().startswith('|') and line.strip().endswith('|'):
-                # Table row
-                p = doc.add_paragraph(line)
-                p.style = 'Table Grid'
-            elif '**' in line:
-                # Bold text
-                p = doc.add_paragraph()
-                parts = line.split('**')
-                for i, part in enumerate(parts):
-                    run = p.add_run(part)
-                    if i % 2 == 1:  # Odd indices are between **
-                        run.bold = True
-            elif line.strip():
-                # Regular paragraph
-                p = doc.add_paragraph(line)
-            else:
-                # Empty line
-                doc.add_paragraph()
-        
-        # Save to bytes buffer
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        
-        return buffer
-        
-    except Exception as e:
-        # Fallback: create simple text buffer
-        buffer = io.BytesIO()
-        buffer.write(content.encode('utf-8'))
-        buffer.seek(0)
-        return buffer
-
-def chat_with_transcript_enhanced(question, transcript_text, api_key):
-    """
-    Enhanced chat function with better name recognition
-    """
-    if not api_key:
-        return {
-            'success': True,
-            'content': "Untuk analisis mendalam, setup API key di secrets.toml. Saat ini menggunakan analisis dasar.",
-            'error': None
-        }
-    
-    try:
-        # Configure API
-        genai.configure(api_key=api_key)
-        
-        # Use the most capable model for chat
-        model = genai.GenerativeModel("models/gemini-1.5-flash-001")
-        
-        # Enhanced context with name recognition focus
-        context = f"""
-        ANALISIS TRANSCRIPT RAPAT UNTUK MENJAWAB PERTANYAAN:
-
-        **TRANSCRIPT:**
-        {transcript_text[:3000]}
-
-        **INSTRUKSI KHUSUS:**
-        1. FOKUS PADA PENGENALAN NAMA DAN JABATAN: Direktur Utama, Komisaris, Manajer, dll.
-        2. CARI NAMA SPESIFIK: Jatna, Budi, Agus, Sari, Ahmad, Dewi, dll.
-        3. IDENTIFIKASI SIAPA YANG BERBICARA dan apa jabatannya.
-        4. JAWAB BERDASARKAN INFORMASI YANG ADA DI TRANSCRIPT SAJA.
-        5. JIKA INFORMASI TIDAK ADA, katakan "Tidak ditemukan dalam transkrip".
-
-        **PERTANYAAN USER:** {question}
-
-        **FORMAT JAWABAN:**
-        - Gunakan bahasa Indonesia formal
-        - Sebutkan nama lengkap dan jabatan jika tersedia
-        - Berikan konteks dari pembicaraan
-        - Jika relevan, sertakan kutipan singkat dari transkrip
-        """
-        
-        response = model.generate_content(
-            context,
-            generation_config={
-                "temperature": 0.1,
-                "top_p": 0.9,
+            
+            # Configuration untuk kualitas tinggi
+            generation_config = {
+                "temperature": 0.1,  # Sangat rendah untuk konsistensi
+                "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 1024,
-            }
-        )
-        
-        if response.text:
-            return {
-                'success': True,
-                'content': response.text,
-                'error': None
-            }
-        else:
-            return {
-                'success': True,
-                'content': "Tidak dapat menemukan informasi spesifik dalam transkrip. Coba pertanyaan yang lebih spesifik.",
-                'error': None
+                "max_output_tokens": 4096,
+                "stop_sequences": ["##"]
             }
             
-    except Exception as e:
-        return {
-            'success': True,
-            'content': f"Sistem chat sedang optimasi. Silakan gunakan fitur generate notulen untuk ringkasan lengkap.",
-            'error': None
-        }
+            # Safety settings yang seimbang
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+            ]
+            
+            # Generate dengan timeout
+            import time
+            start_time = time.time()
+            response = model.generate_content(
+                prompt,
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+            
+            if response and response.text:
+                content = response.text.strip()
+                
+                # Post-processing untuk memastikan kualitas
+                # 1. Pastikan ada header notulen
+                if not content.startswith("# Notulen Rapat"):
+                    content = "# Notulen Rapat\n\n" + content
+                
+                # 2. Pastikan ada tabel peserta
+                if "Peserta Rapat:" not in content and "|No||Nama/Jabatan|" not in content:
+                    # Extract names and add participant table
+                    names = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', sentences[:1000])
+                    unique_names = []
+                    for name in names:
+                        if name not in unique_names and len(name.split()) <= 3:
+                            unique_names.append(name)
+                    
+                    if unique_names:
+                        participant_section = "\n**Peserta Rapat:**\n|No||Nama/Jabatan|\n|---|---|---|\n"
+                        for i, name in enumerate(unique_names[:10], 1):
+                            participant_section += f"|{i}||{name} (Peserta)|\n"
+                        
+                        # Insert after agenda or before discussion
+                        if "**Agenda:**" in content:
+                            parts = content.split("**Agenda:**")
+                            content = parts[0] + "**Agenda:**" + parts[1] + "\n\n" + participant_section
+                
+                # 3. Enhance specific name mentions
+                if "Jatna" in sentences:
+                    if "Jatna" not in content:
+                        # Add Jatna if missing
+                        content = content.replace("Pemimpin Rapat|", f"Pemimpin Rapat|Jatna (Direktur Utama)|")
+                
+                return {
+                    'success': True,
+                    'content': content,
+                    'error': None,
+                    'source': 'gemini_pro',
+                    'model': 'gemini-1.5-pro'
+                }
+                
+        except Exception as e:
+            st.error(f"AI Error: {str(e)}")
+            # Fall through to template
+    
+    # Fallback dengan template cerdas
+    speakers = extract_speakers_with_ai(sentences[:2000], api_key) if api_key else []
+    template = create_intelligent_notulen_template(sentences, speakers)
+    
+    return {
+        'success': True,
+        'content': template,
+        'error': None,
+        'source': 'intelligent_template',
+        'model': 'template_ai_assisted'
+    }
+
+def generate_notulen_with_multimodel(sentences, api_key):
+    """
+    Try multiple models for best results
+    """
+    models_to_try = [
+        ("gemini-1.5-pro", "models/gemini-1.5-pro"),
+        ("gemini-1.5-flash", "models/gemini-1.5-flash"),
+        ("gemini-pro", "models/gemini-pro"),
+    ]
+    
+    if api_key:
+        genai.configure(api_key=api_key)
+        
+        for model_name, model_path in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_path)
+                
+                # Aggressive prompt untuk semua model
+                prompt = f"""
+BUAT NOTULEN RAPAT dari transkrip ini. EKSTRAK SEMUA NAMA dan JABATAN.
+
+TRANSCRIPT:
+{sentences[:3000]}
+
+FORMAT:
+1. # Notulen Rapat
+2. Tabel info (Nama Rapat, Tanggal, Waktu, Tempat, Pemimpin Rapat)
+3. Agenda (bullet points)
+4. Tabel Peserta (Nama dan Jabatan) - UTAMAKAN NAMA ASLI
+5. Tabel Diskusi dengan Penanggung Jawab (NAMA, bukan jabatan)
+6. Action Items dengan PIC (NAMA)
+
+SPESIFIK: Jika ada "Jatna", sebut sebagai "Jatna (Direktur Utama)"
+"""
+                
+                response = model.generate_content(prompt)
+                if response and response.text:
+                    return {
+                        'success': True,
+                        'content': response.text,
+                        'source': 'multimodel',
+                        'model': model_name
+                    }
+            except:
+                continue
+    
+    # Ultimate fallback
+    return generate_notulen_with_gemini_pro(sentences, api_key)
 
 def main():
     st.set_page_config(
-        page_title="Notulen Zoom Meeting Generator by TKMP",
+        page_title="Notulen Zoom Meeting Generator - Enhanced",
         page_icon="📝",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    # Enhanced CSS for better styling
+    # Modern CSS
     st.markdown("""
     <style>
     .main-header {
         text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(90deg, #1a2980 0%, #26d0ce 100%);
+        padding: 1.5rem 0;
+        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        background-clip: text;
         font-size: 2.8rem;
-        font-weight: bold;
+        font-weight: 800;
         margin-bottom: 0.5rem;
-        font-family: 'Arial', sans-serif;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
     .sub-header {
         text-align: center;
-        color: #2c3e50;
-        font-size: 1.2rem;
+        color: #4a5568;
+        font-size: 1.1rem;
         margin-bottom: 2rem;
-        font-weight: 300;
+        font-weight: 400;
+    }
+    .model-badge {
+        background: linear-gradient(90deg, #1a73e8 0%, #4285f4 100%);
+        color: white;
+        padding: 0.4rem 1rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: inline-block;
+        margin: 0.2rem;
+        border: none;
     }
     .performance-badge {
-        background: linear-gradient(90deg, #00b09b 0%, #96c93d 100%);
+        background: linear-gradient(90deg, #00c853 0%, #64dd17 100%);
         color: white;
-        padding: 0.5rem 1.2rem;
+        padding: 0.4rem 1rem;
         border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: bold;
+        font-size: 0.85rem;
+        font-weight: 600;
         display: inline-block;
-        margin: 0.25rem;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-    }
-    .name-recognition-badge {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 0.5rem 1.2rem;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: bold;
-        display: inline-block;
-        margin: 0.25rem;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        margin: 0.2rem;
     }
     .stButton>button {
-        background: linear-gradient(90deg, #1a2980 0%, #26d0ce 100%);
+        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
         color: white;
         border: none;
         border-radius: 8px;
         padding: 0.75rem 1.5rem;
         font-weight: 600;
-        font-family: 'Arial', sans-serif;
-        transition: all 0.3s ease;
+        font-size: 1rem;
+        transition: all 0.3s;
     }
     .stButton>button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(26, 41, 128, 0.3);
+        box-shadow: 0 5px 20px rgba(30, 60, 114, 0.3);
     }
     .success-box {
         background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
         color: #155724;
-        padding: 1.5rem;
+        padding: 1.2rem;
         border-radius: 10px;
         border-left: 5px solid #28a745;
         margin: 1rem 0;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+        font-weight: 500;
+    }
+    .warning-box {
+        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+        color: #856404;
+        padding: 1.2rem;
+        border-radius: 10px;
+        border-left: 5px solid #ffc107;
+        margin: 1rem 0;
     }
     .info-box {
-        background: linear-gradient(135deg, #e8f4fd 0%, #d1ecf1 100%);
+        background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
         color: #0c5460;
-        padding: 1.5rem;
+        padding: 1.2rem;
         border-radius: 10px;
         border-left: 5px solid #17a2b8;
         margin: 1rem 0;
-        box-shadow: 0 3px 10px rgba(0,0,0,0.08);
     }
-    .performance-meter {
-        background: #f8f9fa;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        border: 1px solid #dee2e6;
-    }
-    .executive-highlight {
-        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-        border-left: 4px solid #ffc107;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }
-    .name-tag {
-        display: inline-block;
+    .name-highlight {
         background: #e3f2fd;
-        color: #1976d2;
+        color: #1a73e8;
         padding: 0.25rem 0.75rem;
-        border-radius: 15px;
-        margin: 0.1rem 0.25rem;
-        font-size: 0.85rem;
-        font-weight: 500;
+        border-radius: 4px;
+        font-weight: 600;
+        margin: 0 0.1rem;
     }
-    .position-tag {
-        display: inline-block;
+    .position-highlight {
         background: #f3e5f5;
-        color: #7b1fa2;
+        color: #8e24aa;
         padding: 0.25rem 0.75rem;
-        border-radius: 15px;
-        margin: 0.1rem 0.25rem;
-        font-size: 0.85rem;
+        border-radius: 4px;
         font-weight: 500;
+        margin: 0 0.1rem;
     }
-    .chat-container {
-        max-height: 500px;
-        overflow-y: auto;
-        padding: 1rem;
-        background: #f8f9fa;
+    .stats-box {
+        background: white;
+        border: 1px solid #e2e8f0;
         border-radius: 10px;
-        border: 1px solid #dee2e6;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .stats-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1e3c72;
+        text-align: center;
+    }
+    .stats-label {
+        font-size: 0.9rem;
+        color: #718096;
+        text-align: center;
+        margin-top: 0.25rem;
     }
     </style>
     """, unsafe_allow_html=True)
 
-    # Header with performance badges
-    st.markdown('<h1 class="main-header">📝 Notulen Zoom Meeting Generator by TKMP</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Enhanced AI Performance • Name Recognition • Professional Format</p>', unsafe_allow_html=True)
+    # Header
+    st.markdown('<h1 class="main-header">📝 Notulen Generator - Gemini Pro Enhanced</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Menggunakan Gemini 1.5 Pro untuk hasil terbaik • Name Recognition • Executive Focus</p>', unsafe_allow_html=True)
     
-    # Performance badges
+    # Model badges
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown('<div class="performance-badge">🚀 Fast Processing</div>', unsafe_allow_html=True)
+        st.markdown('<div class="model-badge">🚀 Gemini 1.5 Pro</div>', unsafe_allow_html=True)
     with col2:
-        st.markdown('<div class="name-recognition-badge">👤 Name Detection</div>', unsafe_allow_html=True)
+        st.markdown('<div class="performance-badge">🎯 Jatna Detection</div>', unsafe_allow_html=True)
     with col3:
-        st.markdown('<div class="performance-badge">📊 Executive Focus</div>', unsafe_allow_html=True)
+        st.markdown('<div class="model-badge">📊 Executive Names</div>', unsafe_allow_html=True)
     with col4:
-        st.markdown('<div class="name-recognition-badge">🎯 Jatna Detection</div>', unsafe_allow_html=True)
+        st.markdown('<div class="performance-badge">⚡ Fast Processing</div>', unsafe_allow_html=True)
     
     # Get API key
     try:
         api_key = st.secrets["api_key"]
         api_key_available = True
-    except (KeyError, FileNotFoundError):
+    except:
         api_key = None
         api_key_available = False
     
     # Sidebar
     with st.sidebar:
-        st.header("⚙️ Enhanced Configuration")
+        st.header("⚙️ Model Configuration")
         
         if api_key_available:
-            st.success("✅ API Key loaded successfully")
-            st.markdown('<div class="performance-meter"><strong>AI Mode:</strong> Enhanced Performance</div>', unsafe_allow_html=True)
+            st.success("✅ Gemini API Ready")
+            st.markdown("""
+            **Active Model:** Gemini 1.5 Pro
+            **Features:**
+            - Advanced name extraction
+            - Executive recognition
+            - Smart template fallback
+            """)
         else:
-            st.warning("⚠️ API Key not found")
-            st.markdown('<div class="info-box"><strong>Basic Mode:</strong> Intelligent Template<br>Setup API key for AI enhancement</div>', unsafe_allow_html=True)
+            st.warning("⚠️ API Key Required")
+            st.info("""
+            **Untuk hasil terbaik:**
+            1. Dapatkan API key dari [Google AI Studio](https://makersuite.google.com/app/apikey)
+            2. Tambahkan ke `.streamlit/secrets.toml`:
+            ```toml
+            api_key = "your_gemini_api_key"
+            ```
+            """)
         
-        # Name detection info
-        st.header("👤 Name Detection")
+        st.header("🎯 Features")
         st.markdown("""
-        **Dikenali Otomatis:**
-        - Direktur Utama
-        - Komisaris
-        - Presiden Direktur
-        - General Manager
-        - Nama spesifik: **Jatna**, Budi, Agus, Sari
+        - **Gemini 1.5 Pro** - Model terbaik untuk notulen
+        - **Name Force Extraction** - Agresif ekstrak nama
+        - **Executive Priority** - Direktur, Komisaris diutamakan
+        - **Jatna Focus** - Deteksi spesifik untuk "Jatna"
+        - **Multi-model Fallback** - 3 model cadangan
         """)
         
-        st.header("🚀 Performance Features")
-        st.markdown("""
-        - **Multi-model AI** for best results
-        - **Executive name recognition**
-        - **Enhanced prompt engineering**
-        - **Intelligent fallback system**
-        - **100% success guarantee**
-        """)
-
+        st.header("📊 Stats")
+        if 'processed_count' not in st.session_state:
+            st.session_state.processed_count = 0
+        
+        st.metric("Documents Generated", st.session_state.processed_count)
+    
     # Main tabs
-    tab1, tab2 = st.tabs(["📄 Generate Enhanced Notulen", "💬 Enhanced Chat"])
+    tab1, tab2 = st.tabs(["🚀 Generate Notulen", "⚡ Quick Generate"])
 
     with tab1:
-        st.markdown("### 📤 Upload Transkrip Rapat")
+        st.markdown("### 📤 Upload Transcript")
         
         uploaded_file = st.file_uploader(
-            "Pilih File VTT/TXT",
+            "Drag & drop atau pilih file",
             type=['vtt', 'txt'],
-            help="Upload transcript dari Zoom/Teams/Google Meet",
-            key="file_uploader"
+            help="Format: .vtt (Zoom) atau .txt",
+            key="main_uploader"
         )
         
         if uploaded_file is not None:
-            # Process and store transcript
             content = uploaded_file.getvalue().decode("utf-8", errors='ignore')
             cleaned_transcript = process_vtt_text(content)
             st.session_state.uploaded_transcript = cleaned_transcript
             
-            # Show transcript info with name detection
-            st.markdown("#### 📊 Analisis Transkrip")
+            # Stats
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown("""
+                <div class="stats-box">
+                    <div class="stats-value">{:,}</div>
+                    <div class="stats-label">Kata</div>
+                </div>
+                """.format(len(cleaned_transcript.split())), unsafe_allow_html=True)
+            with col2:
+                st.markdown("""
+                <div class="stats-box">
+                    <div class="stats-value">{:,}</div>
+                    <div class="stats-label">Karakter</div>
+                </div>
+                """.format(len(cleaned_transcript)), unsafe_allow_html=True)
+            with col3:
+                st.markdown("""
+                <div class="stats-box">
+                    <div class="stats-value">{}</div>
+                    <div class="stats-label">Baris</div>
+                </div>
+                """.format(cleaned_transcript.count('\n') + 1), unsafe_allow_html=True)
+            with col4:
+                # Check for important names
+                has_jatna = "Jatna" in cleaned_transcript
+                has_direktur = any(word in cleaned_transcript for word in ["Direktur", "Dirut", "Komisaris"])
+                status = "✓ Names Found" if has_jatna or has_direktur else "Basic"
+                st.markdown(f"""
+                <div class="stats-box">
+                    <div class="stats-value">{status}</div>
+                    <div class="stats-label">Name Detection</div>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Extract names for preview
-            detected_people = extract_important_names_and_positions(cleaned_transcript[:2000])
+            # Preview
+            with st.expander("👁️ Transcript Preview", expanded=False):
+                st.text_area("", cleaned_transcript[:1500], height=200, disabled=True)
             
+            # Generate buttons
             col1, col2 = st.columns(2)
             with col1:
-                st.info(f"**File:** {uploaded_file.name}")
-                st.info(f"**Size:** {uploaded_file.size:,} bytes")
+                if st.button("🚀 Generate with Gemini Pro", type="primary", use_container_width=True):
+                    with st.spinner("🧠 Gemini Pro sedang menganalisis..."):
+                        result = generate_notulen_with_gemini_pro(cleaned_transcript, api_key)
+                        
+                        st.session_state.ai_notulen = result['content']
+                        st.session_state.processed = True
+                        st.session_state.generation_model = result['model']
+                        st.session_state.processed_count += 1
+                        
+                        if result['source'] == 'gemini_pro':
+                            st.success("✅ Gemini Pro generation successful!")
+                            st.markdown(f"""
+                            <div class="success-box">
+                                <strong>Gemini 1.5 Pro Active</strong><br>
+                                Model canggih untuk ekstraksi nama dan struktur terbaik
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.success("✅ Intelligent template generated!")
+            
             with col2:
-                st.info(f"**Karakter:** {len(cleaned_transcript):,}")
-                st.info(f"**Peserta Terdeteksi:** {len(detected_people)}")
-            
-            # Show detected executives
-            if detected_people:
-                st.markdown("#### 👥 Identifikasi Peserta")
-                for name, title in list(detected_people.items())[:5]:
-                    st.markdown(f'<span class="name-tag">{name}</span> <span class="position-tag">{title}</span>', unsafe_allow_html=True)
-            
-            # Preview transcript
-            with st.expander("👁️ Preview Transkrip (50 baris pertama)"):
-                st.text_area("", cleaned_transcript[:2000], height=200, disabled=True)
-            
-            # Enhanced generate button
-            if st.button("🚀 Generate Enhanced Notulen", type="primary", use_container_width=True):
-                with st.spinner("🤖 Enhanced AI sedang memproses dengan name recognition..."):
-                    # Generate enhanced notulen
-                    result = generate_notulen_with_enhanced_ai(cleaned_transcript, api_key)
-                    
-                    # Store results
-                    st.session_state.ai_notulen = result['content']
-                    st.session_state.processed = True
-                    st.session_state.generation_source = result['source']
-                    st.session_state.generation_model = result['model']
-                    
-                    # Success message based on source
-                    if result['source'] == 'ai_enhanced':
-                        st.success("✅ Notulen berhasil dibuat dengan Enhanced AI!")
-                        st.markdown('<div class="executive-highlight">🎯 <strong>Executive names detected and included</strong></div>', unsafe_allow_html=True)
-                    else:
-                        st.success("✅ Notulen berhasil dibuat dengan Intelligent Template!")
-                    
-                    # Show generation info
-                    source_display = {
-                        'ai_enhanced': 'AI Enhanced dengan Name Recognition',
-                        'enhanced_fallback': 'Intelligent Template'
-                    }.get(result['source'], 'Sistem')
-                    
-                    st.markdown(f'<div class="info-box"><strong>📊 Mode:</strong> {source_display}</div>', unsafe_allow_html=True)
+                if st.button("⚡ Quick Generate (Multi-model)", use_container_width=True):
+                    with st.spinner("Trying multiple models for best result..."):
+                        result = generate_notulen_with_multimodel(cleaned_transcript, api_key)
+                        
+                        st.session_state.ai_notulen = result['content']
+                        st.session_state.processed = True
+                        st.session_state.generation_model = result['model']
+                        st.session_state.processed_count += 1
+                        
+                        st.success(f"✅ Generated with {result['model']}!")
         
-        # Display generated notulen
+        # Display results
         if 'ai_notulen' in st.session_state and st.session_state.get('processed', False):
             st.divider()
-            st.markdown("### 📋 Enhanced Notulen")
+            st.markdown("### 📋 Generated Notulen")
             
-            # Success message
-            if st.session_state.get('generation_source') == 'ai_enhanced':
+            # Model info
+            model_name = st.session_state.get('generation_model', 'Unknown')
+            st.markdown(f"**Model:** <span class='model-badge'>{model_name}</span>", unsafe_allow_html=True)
+            
+            # Check for Jatna in output
+            if "Jatna" in st.session_state.ai_notulen:
                 st.markdown("""
                 <div class="success-box">
-                    <strong>✅ ENHANCED AI GENERATION BERHASIL!</strong><br>
-                    Notulen dengan executive name recognition telah dibuat. Nama dan jabatan penting telah diidentifikasi.
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div class="success-box">
-                    <strong>✅ INTELLIGENT TEMPLATE BERHASIL!</strong><br>
-                    Notulen dengan struktur profesional telah dibuat. Silakan review dan lengkapi informasi.
+                    <strong>🎯 JATNA DETECTED!</strong> Nama spesifik berhasil diidentifikasi dalam notulen.
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Display notulen
+            # Display content
             st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
             
             # Download section
             st.divider()
-            st.markdown("### 💾 Download Options")
+            st.markdown("### 💾 Download")
             
-            col1, col2, col3 = st.columns(3)
-            
+            col1, col2 = st.columns(2)
             with col1:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 st.download_button(
                     label="📄 Download TXT",
                     data=st.session_state.ai_notulen,
-                    file_name=f"Notulen_Enhanced_{timestamp}.txt",
+                    file_name=f"Notulen_{timestamp}.txt",
                     mime="text/plain",
                     use_container_width=True
                 )
-            
             with col2:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                word_buffer = create_enhanced_word_document(st.session_state.ai_notulen, f"Notulen_{timestamp}.docx")
-                if word_buffer:
+                # Simple Word creation
+                try:
+                    doc = Document()
+                    doc.add_heading('Notulen Rapat', 0)
+                    doc.add_paragraph(st.session_state.ai_notulen)
+                    
+                    buffer = io.BytesIO()
+                    doc.save(buffer)
+                    buffer.seek(0)
+                    
                     st.download_button(
                         label="📝 Download Word",
-                        data=word_buffer.getvalue(),
-                        file_name=f"Notulen_Enhanced_{timestamp}.docx",
+                        data=buffer.getvalue(),
+                        file_name=f"Notulen_{timestamp}.docx",
                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                         use_container_width=True
                     )
+                except:
+                    pass
             
-            with col3:
-                if st.button("🔄 Regenerate", use_container_width=True):
+            # Regenerate options
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Regenerate with Different Model", use_container_width=True):
                     if 'uploaded_transcript' in st.session_state:
-                        with st.spinner("Optimizing AI performance..."):
-                            new_result = generate_notulen_with_enhanced_ai(
-                                st.session_state.uploaded_transcript, 
-                                api_key
-                            )
-                            st.session_state.ai_notulen = new_result['content']
-                            st.session_state.generation_source = new_result['source']
-                            st.rerun()
-            
-            # Clear button
-            if st.button("🗑️ Clear Results", use_container_width=True):
-                keys_to_delete = ['ai_notulen', 'processed', 'generation_source', 'generation_model']
-                for key in keys_to_delete:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
+                        result = generate_notulen_with_multimodel(st.session_state.uploaded_transcript, api_key)
+                        st.session_state.ai_notulen = result['content']
+                        st.session_state.generation_model = result['model']
+                        st.rerun()
+            with col2:
+                if st.button("🗑️ Clear Results", use_container_width=True):
+                    keys = ['ai_notulen', 'processed', 'generation_model']
+                    for key in keys:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
 
     with tab2:
-        st.markdown("### 💬 Enhanced Chat with Name Recognition")
+        st.markdown("### ⚡ Quick Generate")
+        st.markdown("Masukkan teks transkrip langsung:")
         
-        if 'uploaded_transcript' not in st.session_state or not st.session_state.uploaded_transcript:
-            st.markdown("""
-            <div class="info-box">
-                <strong>📝 Upload Transcript Terlebih Dahulu</strong><br>
-                Upload file transkrip di tab "Generate Notulen" untuk mengaktifkan fitur chat dengan name recognition.
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown("""
-            **🎯 Contoh Pertanyaan untuk Enhanced Chat:**
-            
-            **Tentang Eksekutif:**
-            - Siapa Direktur Utama dalam rapat?
-            - Apa peran Komisaris dalam diskusi?
-            - Apakah Jatna hadir dalam rapat?
-            
-            **Tentang Diskusi:**
-            - Siapa yang memimpin presentasi?
-            - Siapa penanggung jawab untuk action items?
-            - Siapa yang memberikan arahan strategis?
-            
-            **Analisis Peserta:**
-            - Sebutkan semua manajer yang hadir
-            - Siapa dari divisi keuangan yang berbicara?
-            - Sebutkan eksekutif level direktur yang hadir
-            """)
-        else:
-            st.markdown("""
-            <div class="success-box">
-                ✅ <strong>Transkrip Tersedia!</strong> Enhanced chat dengan name recognition siap digunakan.
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Initialize chat history
-            if "chat_history" not in st.session_state:
-                st.session_state.chat_history = []
-            
-            # Display chat history
-            st.markdown("#### 💭 History Percakapan")
-            if st.session_state.chat_history:
-                for message in st.session_state.chat_history[-6:]:  # Show last 6 messages
-                    if message["role"] == "user":
-                        st.markdown(f'<div class="chat-message user-message"><strong>👤 Anda:</strong> {message["content"]}</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 AI:</strong> {message["content"]}</div>', unsafe_allow_html=True)
-            else:
-                st.info("Mulai percakapan dengan menanyakan tentang peserta rapat, diskusi, atau keputusan.")
-            
-            # Chat input
-            st.markdown("#### 💬 Ajukan Pertanyaan")
-            
-            question = st.text_input(
-                "Pertanyaan Anda:",
-                placeholder="Contoh: Siapa Direktur Utama dalam rapat ini?",
-                label_visibility="collapsed"
-            )
-            
-            # Quick question buttons
-            st.markdown("**Pertanyaan Cepat:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("Siapa pemimpin rapat?", use_container_width=True):
-                    question = "Siapa pemimpin rapat?"
-            with col2:
-                if st.button("Sebutkan eksekutif yang hadir", use_container_width=True):
-                    question = "Sebutkan semua eksekutif level direktur yang hadir dalam rapat"
-            with col3:
-                if st.button("Apakah Jatna hadir?", use_container_width=True):
-                    question = "Apakah Jatna hadir dalam rapat ini?"
-            
-            # Process question
-            if question:
-                # Add to history
-                st.session_state.chat_history.append({
-                    "role": "user",
-                    "content": question
-                })
-                
-                # Get enhanced response
-                with st.spinner("🔍 Enhanced AI menganalisis transkrip..."):
-                    response = chat_with_transcript_enhanced(
-                        question,
-                        st.session_state.uploaded_transcript,
-                        api_key
-                    )
+        quick_text = st.text_area(
+            "Paste transcript here:",
+            height=200,
+            placeholder="Tempel transkrip rapat di sini...",
+            key="quick_input"
+        )
+        
+        if st.button("⚡ Generate Now", type="primary", use_container_width=True):
+            if quick_text and len(quick_text) > 50:
+                with st.spinner("Processing..."):
+                    result = generate_notulen_with_gemini_pro(quick_text, api_key)
                     
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": response['content']
-                    })
-                
-                st.rerun()
+                    st.session_state.quick_notulen = result['content']
+                    st.session_state.quick_processed = True
+                    st.success("✅ Generated!")
+                    
+                    st.markdown("### 📋 Quick Notulen")
+                    st.markdown(result['content'][:2000] + "...")
+                    
+                    # Quick download
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.download_button(
+                        label="📥 Download Quick Notulen",
+                        data=result['content'],
+                        file_name=f"Quick_Notulen_{timestamp}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+            else:
+                st.warning("Masukkan transkrip yang cukup panjang (minimal 50 karakter).")
     
     # Footer
     st.divider()
     st.markdown("""
-    <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p><strong>Enhanced Notulen Generator v2.0</strong> • TKMP Corporate Transformation</p>
-        <p style='font-size: 0.9rem;'>
-            🚀 <strong>Enhanced AI Performance</strong> • 👤 <strong>Executive Name Recognition</strong> • 
-            🎯 <strong>Jatna Detection</strong> • 📊 <strong>Professional Format</strong>
-        </p>
-        <p style='font-size: 0.8rem; color: #999;'>Optimized for Indonesian Corporate Meetings • 100% Success Guarantee</p>
+    <div style='text-align: center; color: #4a5568; padding: 1.5rem; font-size: 0.9rem;'>
+        <p><strong>Gemini 1.5 Pro Enhanced • TKMP Corporate Solutions</strong></p>
+        <p>Optimized for Indonesian corporate meetings • Executive name recognition • Professional formatting</p>
     </div>
     """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
 
 # import streamlit as st
 # import re
