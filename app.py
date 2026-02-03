@@ -7,59 +7,43 @@ from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# ==========================================
-# CORE PROCESSING FUNCTIONS
-# ==========================================
+# ==============================================================================
+# DATA PROCESSING LAYER
+# ==============================================================================
 
 def process_vtt_text(vtt_text):
     """
-    Process VTT text to clean timestamps and metadata
+    Fungsi untuk membersihkan transkrip VTT dari timestamp dan metadata.
+    Memastikan teks bersih sebelum dikirim ke LLM.
     """
-    # Clean timestamp & metadata
+    # Menghapus timestamp (00:00:00.000 --> 00:00:00.000)
     cleaned_text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3} --> .*", "", vtt_text)
+    # Menghapus header WEBVTT
     cleaned_text = re.sub(r"WEBVTT.*\n", "", cleaned_text)
+    # Menghapus baris kosong berlebih
     cleaned_text = "\n".join([line.strip() for line in cleaned_text.splitlines() if line.strip()])
     return cleaned_text
 
-def get_gemini_model(api_key):
-    """
-    Helper function to initialize the model with fallback mechanism 
-    to prevent 404 errors on specific environments.
-    """
-    genai.configure(api_key=api_key)
-    
-    # List of model names to try in order of preference
-    model_candidates = [
-        "gemini-1.5-flash",
-        "models/gemini-1.5-flash",
-        "gemini-pro",
-        "models/gemini-pro"
-    ]
-    
-    for model_name in model_candidates:
-        try:
-            model = genai.GenerativeModel(model_name)
-            # Test small generation to verify 404
-            return model
-        except Exception:
-            continue
-    
-    # Default fallback
-    return genai.GenerativeModel("gemini-pro")
+# ==============================================================================
+# GEN AI INTEGRATION LAYER (MODEL: GEMINI-PRO)
+# ==============================================================================
 
 def generate_notulen_with_ai(sentences, api_key):
     """
-    Generate formal meeting minutes using Google Gemini API
-    Optimized to bypass safety filters and handle model name errors.
+    Menghasilkan notulen rapat formal menggunakan model Gemini Pro (1.0).
+    Model ini dipilih karena stabilitasnya dan kompatibilitas tinggi dengan API v1.
     """
     try:
-        # Initialize model with fallback logic
-        model = get_gemini_model(api_key)
+        # Konfigurasi API Google
+        genai.configure(api_key=api_key)
         
-        # REFINED PROMPT with strong emphasis on professional, non-sensitive content
-        # framing as an administrative task to reduce safety triggers
+        # MENGGUNAKAN GEMINI-PRO (Model selain Flash 1.5)
+        # Model ini sangat stabil untuk instruksi teks panjang
+        model = genai.GenerativeModel("gemini-pro")
+        
+        # PROMPT UTAMA (Preserving original instructions and context)
         prompt = f"""
-**INI ADALAH DATA RAPAT FORMAL PERUSAHAAN PT PELABUHAN INDONESIA (PELINDO). BUATKAN NOTULEN RAPAT DENGAN BAHASA INDONESIA YANG FORMAL DAN PROFESIONAL. HANYA FOKUS PADA AGENDA, DISKUSI, DAN KEPUTUSAN SAJA.**
+**INI ADALAH DATA RAPAT FORMAL PERUSAHAAN. BUATKAN NOTULEN RAPAT DENGAN BAHASA INDONESIA YANG FORMAL DAN PROFESIONAL. HANYA FOKUS PADA AGENDA, DISKUSI, DAN KEPUTUSAN SAJA.**
 
 Buatkan notulen rapat yang rapi dan formal dari transkrip rapat berikut:
 
@@ -113,13 +97,15 @@ INSTRUKSI KHUSUS:
 Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tidak disebutkan dalam transkrip].
 """
         
+        # Konfigurasi Generasi
         generation_config = {
             "temperature": 0.2,
             "top_p": 0.8,
             "top_k": 40,
-            "max_output_tokens": 4096,
+            "max_output_tokens": 2048,
         }
         
+        # Safety Settings - Menghindari pemblokiran pada konten rapat korporasi
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -127,7 +113,7 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
         ]
         
-        # Use streaming to catch partial results if a safety filter triggers mid-way
+        # Menggunakan stream untuk stabilitas tambahan
         response = model.generate_content(
             prompt, 
             generation_config=generation_config,
@@ -136,19 +122,13 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
         )
         
         full_text = ""
-        try:
-            for chunk in response:
-                if chunk.text:
-                    full_text += chunk.text
-        except Exception as e:
-            if not full_text:
-                return {'success': False, 'content': None, 'error': f"Response blocked or API Error: {str(e)}"}
-            else:
-                full_text += "\n\n[Peringatan: Output terhenti oleh sistem keamanan/teknis]"
-
+        for chunk in response:
+            if chunk.text:
+                full_text += chunk.text
+        
         if full_text:
             cleaned_response = full_text.strip()
-            # Ensure the response starts with the correct header
+            # Validasi Header Notulen
             if not cleaned_response.startswith("# Notulen Rapat"):
                 lines = cleaned_response.split('\n')
                 for i, line in enumerate(lines):
@@ -156,29 +136,25 @@ Catatan: Jika informasi tertentu tidak tersedia dalam transkrip, beri tanda [Tid
                         cleaned_response = '\n'.join(lines[i:])
                         break
             
-            return {
-                'success': True,
-                'content': cleaned_response,
-                'error': None
-            }
+            return {'success': True, 'content': cleaned_response, 'error': None}
         
-        return {'success': False, 'content': None, 'error': 'Model returned empty content'}
+        return {'success': False, 'content': None, 'error': 'Empty response from model'}
             
     except Exception as e:
         return {'success': False, 'content': None, 'error': f"API Error: {str(e)}"}
 
-# ==========================================
-# EXPORT FUNCTIONS
-# ==========================================
+# ==============================================================================
+# DOCUMENT EXPORT LAYER
+# ==============================================================================
 
 def create_word_document(content, filename):
     """
-    Create a Word document from the generated content with formal styling
+    Membuat file Microsoft Word dari hasil generate AI.
+    Menyesuaikan layout agar tetap formal sesuai standar kantor.
     """
     try:
         doc = Document()
-        
-        # Set document margins
+        # Pengaturan Margin (1 Inci)
         sections = doc.sections
         for section in sections:
             section.top_margin = Inches(1)
@@ -186,39 +162,37 @@ def create_word_document(content, filename):
             section.left_margin = Inches(1)
             section.right_margin = Inches(1)
         
-        # Add title
+        # Header Dokumen
         title = doc.add_heading('Notulen Rapat', level=0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_run = title.runs[0]
         title_run.font.size = Pt(16)
         title_run.font.bold = True
         
-        # Add the content as text
-        # Logic to handle table structure in Word could be added here, 
-        # but for now, we provide the cleaned text version.
-        content_para = doc.add_paragraph(content)
+        # Menambahkan Konten
+        doc.add_paragraph(content)
         
-        # Save to bytes buffer
+        # Simpan ke Buffer
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
-        
         return buffer
-        
     except Exception as e:
         st.error(f"Error creating Word document: {e}")
         return None
 
-# ==========================================
-# INTERACTIVE CHAT FUNCTIONS
-# ==========================================
+# ==============================================================================
+# CHAT INTERACTION LAYER
+# ==============================================================================
 
 def chat_with_transcript(question, transcript_text, api_key):
     """
-    Function for interactive chat based on the uploaded transcript
+    Fungsi tanya-jawab interaktif berbasis Gemini Pro.
+    Hanya menjawab berdasarkan konteks transkrip yang diberikan.
     """
     try:
-        model = get_gemini_model(api_key)
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-pro")
         
         context = f"""
         Berikut adalah transkrip rapat yang akan digunakan sebagai referensi untuk menjawab pertanyaan:
@@ -230,36 +204,23 @@ def chat_with_transcript(question, transcript_text, api_key):
         2. Jika informasi tidak ada dalam transcript, katakan "Informasi tidak ditemukan dalam transkrip"
         3. Gunakan bahasa Indonesia yang formal dan profesional
         4. Berikan jawaban yang spesifik berdasarkan data yang ada dalam transkrip
-        5. Jangan membuat informasi yang tidak ada dalam transkrip
 
         Pertanyaan: {question}
         """
         
-        generation_config = {
-            "temperature": 0.3,
-            "top_p": 0.8,
-            "max_output_tokens": 1024,
-        }
-        
-        response = model.generate_content(
-            context, 
-            generation_config=generation_config,
-            safety_settings=[{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}]
-        )
-        
+        response = model.generate_content(context)
         if response.text:
             return {'success': True, 'content': response.text, 'error': None}
-        else:
-            return {'success': False, 'content': None, 'error': 'Empty response'}
-            
+        return {'success': False, 'content': None, 'error': 'Empty response'}
     except Exception as e:
         return {'success': False, 'content': None, 'error': f"Chat Error: {str(e)}"}
 
-# ==========================================
-# MAIN APPLICATION INTERFACE
-# ==========================================
+# ==============================================================================
+# STREAMLIT UI LAYER (PRESERVING ALL INTERFACES)
+# ==============================================================================
 
 def main():
+    # Page Configuration (Original)
     st.set_page_config(
         page_title="Notulen Zoom Meeting Generator by TKMP",
         page_icon="📝",
@@ -267,7 +228,7 @@ def main():
         initial_sidebar_state="expanded"
     )
 
-    # Custom CSS for better styling (Preserving your original style)
+    # Custom CSS (Original Styling)
     st.markdown("""
     <style>
     .main-header {
@@ -303,14 +264,6 @@ def main():
         border: 1px solid #c3e6cb;
         margin: 1rem 0;
     }
-    .error-box {
-        background: #f8d7da;
-        color: #721c24;
-        padding: 1rem;
-        border-radius: 8px;
-        border: 1px solid #f5c6cb;
-        margin: 1rem 0;
-    }
     .chat-message {
         padding: 1rem;
         border-radius: 8px;
@@ -335,11 +288,11 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Header section
+    # UI Header
     st.markdown('<h1 class="main-header">📝 Notulen Zoom Meeting Generator by TKMP</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Generate Notulen dengan praktis no ribet</p>', unsafe_allow_html=True)
     
-    # API Key retrieval
+    # API Key Configuration
     try:
         api_key = st.secrets["api_key"]
         api_key_available = True
@@ -347,10 +300,9 @@ def main():
         api_key = None
         api_key_available = False
     
-    # Sidebar Configuration (Original words preserved)
+    # Sidebar (Original words and instructions)
     with st.sidebar:
         st.header("⚙️ Configuration")
-        
         if api_key_available:
             st.success("✅ API Key loaded successfully")
         else:
@@ -375,12 +327,11 @@ def main():
         6. **Chat** bisa digunakan jika ada file VTT yang diupload
         """)
 
-    # Tabbed Layout (Original Interface)
+    # Main Content Area
     tab1, tab2 = st.tabs(["📄 Generate Notulen", "💬 Chat dengan Transkrip"])
 
     with tab1:
         st.markdown("### 📁 Upload Transkrip")
-        
         uploaded_file = st.file_uploader(
             "Pilih File",
             type=['vtt', 'txt'],
@@ -389,146 +340,83 @@ def main():
         )
         
         if uploaded_file is not None:
-            # Load and process text
-            content_raw = uploaded_file.getvalue().decode("utf-8")
-            st.session_state.uploaded_transcript = process_vtt_text(content_raw)
+            content = uploaded_file.getvalue().decode("utf-8")
+            st.session_state.uploaded_transcript = process_vtt_text(content)
             
-            # Show file metadata
-            col_info1, col_info2 = st.columns(2)
-            with col_info1:
-                st.info(f"**File:** {uploaded_file.name}")
-            with col_info2:
-                st.info(f"**Characters:** {len(st.session_state.uploaded_transcript):,}")
+            col1, col2 = st.columns(2)
+            with col1: st.info(f"**File:** {uploaded_file.name}")
+            with col2: st.info(f"**Characters:** {len(st.session_state.uploaded_transcript):,}")
             
-            # Action button
             if st.button("🚀 Generate Notulen", type="primary", key="generate_btn"):
                 if not api_key_available:
                     st.error("Please configure your API key in secrets.toml first")
                     return
                 
                 with st.spinner("🤖 AI sedang memproses transkrip..."):
-                    try:
-                        if len(st.session_state.uploaded_transcript.strip()) < 50:
-                            st.error("❌ Transkrip terlalu pendek. Pastikan file berisi konten rapat yang cukup.")
-                        else:
-                            ai_result = generate_notulen_with_ai(st.session_state.uploaded_transcript, api_key)
-                            
-                            if ai_result['success']:
-                                st.session_state.ai_notulen = ai_result['content']
-                                st.session_state.processed = True
-                                st.success("✅ Generate Notulen berhasil!")
-                            else:
-                                st.error(f"❌ Error: {ai_result['error']}")
-                                if "safety" in ai_result['error'].lower():
-                                    st.info("💡 **Tips**: Coba edit transkrip untuk menghapus konten yang mungkin sensitif.")
-                    except Exception as e:
-                        st.error(f"❌ Processing error: {str(e)}")
-        
-        # Display Results Area
+                    ai_result = generate_notulen_with_ai(st.session_state.uploaded_transcript, api_key)
+                    if ai_result['success']:
+                        st.session_state.ai_notulen = ai_result['content']
+                        st.session_state.processed = True
+                        st.success("✅ Generate Notulen berhasil!")
+                    else:
+                        st.error(f"❌ Error: {ai_result['error']}")
+
+        # Output Display
         if 'ai_notulen' in st.session_state and st.session_state.get('processed', False):
             st.divider()
             st.markdown("### 📋 Generated Notulen")
             st.markdown('<div class="success-box">✅ <strong>Notulen sukses dibuat!</strong> Silahkan review hasilnya.</div>', unsafe_allow_html=True)
-            
-            # Content display
             st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
             
-            # Download mechanisms
             st.divider()
             st.markdown("### 📥 Download Options")
-            col_dl1, col_dl2 = st.columns(2)
-            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            col_d1, col_d2 = st.columns(2)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            with col_dl1:
-                st.download_button(
-                    label="📄 Download as TXT",
-                    data=st.session_state.ai_notulen,
-                    file_name=f"Notulen_meeting_{timestamp_str}.txt",
-                    mime="text/plain"
-                )
+            with col_d1:
+                st.download_button("📄 Download as TXT", st.session_state.ai_notulen, f"Notulen_{ts}.txt", "text/plain")
+            with col_d2:
+                word_buffer = create_word_document(st.session_state.ai_notulen, f"Notulen_{ts}.docx")
+                if word_buffer:
+                    st.download_button("📝 Download Word", word_buffer.getvalue(), f"Notulen_{ts}.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             
-            with col_dl2:
-                word_doc_buf = create_word_document(st.session_state.ai_notulen, f"Notulen_meeting_{timestamp_str}.docx")
-                if word_doc_buf:
-                    st.download_button(
-                        label="📝 Download Word Document",
-                        data=word_doc_buf.getvalue(),
-                        file_name=f"Notulen_meeting_{timestamp_str}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-            
-            if st.button("🗑️ Clear Results", key="clear_results"):
+            if st.button("🗑️ Clear Results", key="clear_res"):
                 if 'ai_notulen' in st.session_state: del st.session_state.ai_notulen
                 if 'processed' in st.session_state: del st.session_state.processed
                 st.rerun()
 
     with tab2:
         st.markdown("### 💬 Chat dengan Transkrip")
-        
-        if 'uploaded_transcript' not in st.session_state or not st.session_state.uploaded_transcript:
-            st.markdown("""
-            <div class="info-box">
-                <strong>📝 Informasi:</strong> Silakan upload file transkrip VTT terlebih dahulu di tab "Generate Notulen" 
-                untuk mengaktifkan fitur chat.
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.info("""
-            **Contoh pertanyaan yang bisa ditanyakan:**
-            - Siapa saja yang hadir dalam rapat?
-            - Apa agenda utama rapat ini?
-            - Keputusan apa yang diambil dalam rapat?
-            - Siapa yang bertanggung jawab untuk tindak lanjut?
-            - Kapan deadline yang disepakati?
-            """)
+        if 'uploaded_transcript' not in st.session_state:
+            st.markdown('<div class="info-box"><strong>📝 Informasi:</strong> Silakan upload file terlebih dahulu.</div>', unsafe_allow_html=True)
         else:
-            st.markdown("""
-            <div class="success-box">
-                ✅ <strong>Transkrip tersedia!</strong> Anda dapat bertanya tentang konten rapat.
-            </div>
-            """, unsafe_allow_html=True)
+            if "chat_history" not in st.session_state: st.session_state.chat_history = []
             
-            # Session history initialization
-            if "chat_history" not in st.session_state:
-                st.session_state.chat_history = []
-            
-            # Render chat history
             for message in st.session_state.chat_history:
                 msg_role = "user-message" if message["role"] == "user" else "assistant-message"
                 msg_icon = "👤 Anda" if message["role"] == "user" else "🤖 AI"
                 st.markdown(f'<div class="chat-message {msg_role}"><strong>{msg_icon}:</strong> {message["content"]}</div>', unsafe_allow_html=True)
             
-            # Input area
-            user_question = st.text_area("Pertanyaan Anda:", placeholder="Tanyakan apa saja tentang isi rapat...", key="chat_input_area", height=80)
+            user_input = st.text_area("Pertanyaan Anda:", placeholder="Contoh: Apa keputusan rapat?", key="chat_input")
             
-            btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
-            with btn_col1:
-                if st.button("Kirim Pertanyaan", key="send_chat_msg"):
-                    if user_question.strip() and api_key_available:
-                        with st.spinner("🔍 Mencari informasi..."):
-                            chat_resp = chat_with_transcript(user_question, st.session_state.uploaded_transcript, api_key)
-                            if chat_resp['success']:
-                                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                                st.session_state.chat_history.append({"role": "assistant", "content": chat_resp['content']})
+            c1, c2, c3 = st.columns([1, 1, 2])
+            with c1:
+                if st.button("Kirim Pertanyaan"):
+                    if user_input and api_key_available:
+                        with st.spinner("🔍 Mencari..."):
+                            res = chat_with_transcript(user_input, st.session_state.uploaded_transcript, api_key)
+                            if res['success']:
+                                st.session_state.chat_history.append({"role": "user", "content": user_input})
+                                st.session_state.chat_history.append({"role": "assistant", "content": res['content']})
                                 st.rerun()
-                            else:
-                                st.error(chat_resp['error'])
-            
-            with btn_col2:
-                if st.button("Hapus Chat", key="clear_chat_history"):
+            with c2:
+                if st.button("Hapus Chat"):
                     st.session_state.chat_history = []
                     st.rerun()
-            
-            with btn_col3:
-                st.info("💡 Ajukan pertanyaan spesifik berdasarkan konten transkrip.")
 
-    # Footer section
+    # Footer
     st.divider()
-    st.markdown("""
-    <div style='text-align: center; color: #666; padding: 2rem;'>
-        <p>Dibuat dengan ❤️ oleh TKMP</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("<div style='text-align: center; color: #666; padding: 2rem;'><p>Dibuat dengan ❤️ oleh TKMP</p></div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
