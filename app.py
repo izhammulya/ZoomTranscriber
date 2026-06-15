@@ -4,7 +4,7 @@ import time
 import io
 import os
 from typing import Dict, Any, Optional, Tuple, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import google.generativeai as genai
 from docx import Document
@@ -12,7 +12,11 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 import markdown
-from xhtml2pdf import pisa
+try:
+    from xhtml2pdf import pisa
+    PDF_AVAILABLE = True
+except Exception:
+    PDF_AVAILABLE = False
 import hashlib
 
 # ==============================================================================
@@ -24,7 +28,11 @@ class DocumentConfig:
     """Centralized configuration for document generation"""
     MARGIN_INCHES: float = 1.0
     # FALLBACK MODELS SESUAI VERSI ASLI ANDA
-    FALLBACK_MODELS: List[str] = None
+    FALLBACK_MODELS: List[str] = field(default_factory=lambda: [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite"
+    ])
     MAX_OUTPUT_TOKENS: int = 8192
     TEMPERATURE: float = 0.1
     TOP_P: float = 0.95
@@ -663,11 +671,8 @@ def initialize_session_state():
             st.session_state[key] = default_value
 
 def get_api_key() -> Optional[str]:
-    """Get API key from st.secrets"""
-    try:
-        return st.secrets["api_key"]
-    except:
-        return None
+    """Get API key from secrets or environment"""
+    return st.secrets.get("api_key") or os.getenv("GOOGLE_API_KEY")
 
 def process_transcript(uploaded_file, manual_input: str) -> str:
     """Process and combine transcript from multiple sources"""
@@ -907,3 +912,4 @@ def main():
 if __name__ == "__main__":
     main()
     
+
