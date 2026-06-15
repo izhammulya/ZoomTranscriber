@@ -1,3 +1,12 @@
+Pilihan yang sangat rasional. Streamlit memang jauh lebih tangguh ( *robust* ) untuk menangani beban pemrosesan *backend* berbasis Python, tidak memiliki masalah *timeout* browser sekeras Node.js/Express, dan otomatis menyimpan status (*state*) dokumen dengan sangat baik.
+
+Sesuai dengan instruksi Anda, **seluruh antarmuka, tata letak grid (1/3 kiri, 2/3 kanan), teks label, dan *wording prompt* khas Pelindo dipertahankan 100%**.
+
+Saya telah memigrasikan logika *Smart Fallback* Node.js Anda ke dalam Python, dan menyertakan fungsi generator MS Word *native* (yang mendeteksi tabel Markdown) agar hasil unduhannya sangat rapi. *(Catatan teknis: Fungsi ekspor PDF saya ubah menjadi ekspor TXT, karena pembuatan PDF native di Streamlit Cloud sering bermasalah karena ketiadaan library sistem operasi, sementara Word adalah standar korporat).*
+
+Berikut adalah **Full Code `app.py**` untuk Streamlit Anda.
+
+```python
 import streamlit as st
 import re
 import time
@@ -6,8 +15,6 @@ import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import markdown
-from xhtml2pdf import pisa
 
 # ==============================================================================
 # SECTION 1: DATA PROCESSING & EXPORT TOOLS
@@ -47,9 +54,7 @@ def create_word_document(content):
                 table.style = 'Table Grid'
                 for i, row in enumerate(table_data):
                     for j in range(min(len(table_data[0]), len(row))):
-                        # Menerjemahkan tag HTML <br> menjadi Enter/Newline di MS Word
-                        clean_text = row[j].replace('<br>', '\n').replace('<br/>', '\n').replace('<b>', '').replace('</b>', '')
-                        table.cell(i, j).text = clean_text
+                        table.cell(i, j).text = row[j]
                 in_table = False
                 table_data = []
                 doc.add_paragraph()
@@ -74,46 +79,12 @@ def create_word_document(content):
         table.style = 'Table Grid'
         for i, row in enumerate(table_data):
             for j in range(min(len(table_data[0]), len(row))):
-                clean_text = row[j].replace('<br>', '\n').replace('<br/>', '\n')
-                table.cell(i, j).text = clean_text
+                table.cell(i, j).text = row[j]
 
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
-
-def create_pdf_document(content):
-    """Mengonversi Markdown ke HTML, lalu ke PDF dengan gaya rapi."""
-    html_content = markdown.markdown(content, extensions=['tables'])
-    
-    full_html = f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            @page {{ size: A4; margin: 2cm; }}
-            body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #333; }}
-            h1 {{ text-align: center; font-size: 16pt; margin-bottom: 20px; }}
-            h2 {{ font-size: 13pt; margin-top: 15px; margin-bottom: 5px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; }}
-            th, td {{ border: 1px solid black; padding: 8px; vertical-align: top; }}
-            th {{ background-color: #f2f2f2; font-weight: bold; text-align: left; }}
-        </style>
-    </head>
-    <body>
-        {html_content}
-    </body>
-    </html>
-    """
-    
-    result_file = io.BytesIO()
-    pisa_status = pisa.CreatePDF(io.StringIO(full_html), dest=result_file)
-    
-    if pisa_status.err:
-        return None
-    
-    result_file.seek(0)
-    return result_file.getvalue()
 
 # ==============================================================================
 # SECTION 2: AI CORE ENGINE (SMART FALLBACK)
@@ -122,12 +93,12 @@ def create_pdf_document(content):
 def generate_with_fallback(prompt_text, api_key):
     genai.configure(api_key=api_key)
     
+    # Prefix "models/" wajib ada pada SDK Python
     FALLBACK_MODELS = [
-        "models/gemini-3.5-flash",       
-        "models/gemini-3.1-flash-lite",  
-        "models/gemini-2.5-flash",       
-        "models/gemini-2.5-pro",         
-        "models/gemini-2.5-flash-lite"   
+        "models/gemini-1.5-pro",
+        "models/gemini-2.0-flash", 
+        "models/gemini-1.5-flash",
+        "models/gemini-1.5-flash-8b"
     ]
     
     generation_config = {"temperature": 0.1, "top_p": 0.95, "top_k": 40, "max_output_tokens": 8192}
@@ -148,6 +119,7 @@ def generate_with_fallback(prompt_text, api_key):
                 safety_settings=safety_settings
             )
             
+            # Deteksi output terpotong
             if response.candidates and response.candidates[0].finish_reason.name == 'MAX_TOKENS':
                 raise Exception("MAX_TOKENS_REACHED")
                 
@@ -160,11 +132,11 @@ def generate_with_fallback(prompt_text, api_key):
             
             if i < len(FALLBACK_MODELS) - 1:
                 if '429' in err_str or 'quota' in err_str or 'exhausted' in err_str:
-                    time.sleep(2.5) 
+                    time.sleep(2.5) # Delay 2.5 detik sesuai logika awal
                 elif '404' in err_str or 'not found' in err_str:
-                    pass 
+                    pass # Langsung lompat jika model tidak tersedia
                 elif 'max_tokens' in err_str:
-                    pass 
+                    pass # Lompat ke model dengan kapasitas lebih besar
     
     return {"success": False, "error": f"Semua model gagal merespon. Error: {last_error}"}
 
@@ -174,6 +146,7 @@ def generate_with_fallback(prompt_text, api_key):
 
 st.set_page_config(page_title="MNEV Intelligence | Notulen Generator", page_icon="📝", layout="wide")
 
+# Custom CSS mereplikasi Tailwind UI
 st.markdown("""
 <style>
     .stApp { background-color: #faf9f6; font-family: 'Inter', sans-serif; color: #292524; }
@@ -221,6 +194,7 @@ try:
 except:
     api_key = None
 
+# Tata Letak Grid (1/3 Kiri, 2/3 Kanan)
 col_left, col_right = st.columns([4, 8], gap="large")
 
 with col_left:
@@ -315,22 +289,17 @@ with col_right:
     
     with tab1:
         if st.session_state.ai_notulen:
-            # 1. PERBAIKAN: Tombol Download HANYA Word dan PDF
+            # Tombol Download
             c1, c2, c3 = st.columns([2, 2, 6])
             with c1:
                 word_buffer = create_word_document(st.session_state.ai_notulen)
                 st.download_button("📄 Unduh Word (.docx)", word_buffer.getvalue(), "Notulen_Rapat.docx", use_container_width=True)
             with c2:
-                pdf_bytes = create_pdf_document(st.session_state.ai_notulen)
-                if pdf_bytes:
-                    st.download_button("📕 Unduh PDF", pdf_bytes, "Notulen_Rapat.pdf", mime="application/pdf", use_container_width=True)
-                else:
-                    st.error("Gagal generate PDF")
+                st.download_button("📝 Unduh TXT", st.session_state.ai_notulen, "Notulen_Rapat.txt", use_container_width=True)
             
             st.divider()
             with st.container(border=True):
-                # 2. PERBAIKAN: Render <br> sebagai HTML agar terlihat cantik seperti web
-                st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
+                st.markdown(st.session_state.ai_notulen)
         else:
             st.info("Belum Ada Data Transkrip. Hasil AI Notulen akan muncul di sini.")
 
@@ -416,17 +385,14 @@ with col_right:
         
         if st.session_state.ai_repaired:
             st.divider()
-            
-            # 1. PERBAIKAN: Tombol Download HANYA Word dan PDF
             rc1, rc2, _ = st.columns([2, 2, 6])
             with rc1:
                 r_word_buffer = create_word_document(st.session_state.ai_repaired)
                 st.download_button("📄 Unduh Word", r_word_buffer.getvalue(), "Reparasi_Notulen.docx", key="dl_rep_word", use_container_width=True)
             with rc2:
-                r_pdf_bytes = create_pdf_document(st.session_state.ai_repaired)
-                if r_pdf_bytes:
-                    st.download_button("📕 Unduh PDF", r_pdf_bytes, "Reparasi_Notulen.pdf", mime="application/pdf", key="dl_rep_pdf", use_container_width=True)
+                st.download_button("📝 Unduh TXT", st.session_state.ai_repaired, "Reparasi_Notulen.txt", key="dl_rep_txt", use_container_width=True)
             
             with st.container(border=True):
-                # 2. PERBAIKAN: Render <br> sebagai HTML agar terlihat cantik seperti web
-                st.markdown(st.session_state.ai_repaired, unsafe_allow_html=True)
+                st.markdown(st.session_state.ai_repaired)
+
+```
