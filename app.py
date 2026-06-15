@@ -81,16 +81,20 @@ def create_word_document(content):
 # SECTION 2: AI CORE ENGINE (SMART FALLBACK)
 # ==============================================================================
 
+# ==============================================================================
+# SECTION 2: AI CORE ENGINE (SMART FALLBACK)
+# ==============================================================================
+
 def generate_with_fallback(prompt_text, api_key):
     genai.configure(api_key=api_key)
     
     # Prefix "models/" wajib ada pada SDK Python
-  FALLBACK_MODELS = [
-        "models/gemini-3.5-flash",       # Prioritas 1: Generasi terbaru (Rilis pertengahan 2026). Paling cerdas di kelas gratis, cepat, dan setara model Pro tahun lalu.
-        "models/gemini-3.1-flash-lite",  # Prioritas 2: Model efisien terbaru, dirancang khusus untuk memproses volume tinggi tanpa error.
-        "models/gemini-2.5-flash",       # Prioritas 3: Generasi stabil sebelumnya, batas limit gratisnya (RPM) masih sangat aman.
-        "models/gemini-2.5-pro",         # Prioritas 4: Versi Pro lama yang masih tersisa di Free Tier (Namun kuota sangat terbatas, hanya 5 Request per Menit).
-        "models/gemini-2.5-flash-lite"   # Prioritas 5: Pertahanan terakhir yang sangat ringan, memastikan aplikasi tidak pernah crash.
+    FALLBACK_MODELS = [
+        "models/gemini-3.5-flash",       # Prioritas 1: Generasi terbaru
+        "models/gemini-3.1-flash-lite",  # Prioritas 2: Model efisien terbaru
+        "models/gemini-2.5-flash",       # Prioritas 3: Generasi stabil sebelumnya
+        "models/gemini-2.5-pro",         # Prioritas 4: Versi Pro lama 
+        "models/gemini-2.5-flash-lite"   # Prioritas 5: Pertahanan terakhir
     ]
     
     generation_config = {"temperature": 0.1, "top_p": 0.95, "top_k": 40, "max_output_tokens": 8192}
@@ -131,7 +135,6 @@ def generate_with_fallback(prompt_text, api_key):
                     pass # Lompat ke model dengan kapasitas lebih besar
     
     return {"success": False, "error": f"Semua model gagal merespon. Error: {last_error}"}
-
 # ==============================================================================
 # SECTION 3: STREAMLIT UI (MNEV INTELLIGENCE)
 # ==============================================================================
