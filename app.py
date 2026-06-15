@@ -86,10 +86,11 @@ def generate_with_fallback(prompt_text, api_key):
     
     # Prefix "models/" wajib ada pada SDK Python
     FALLBACK_MODELS = [
-        "models/gemini-1.5-pro",
-        "models/gemini-2.0-flash", 
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-flash-8b"
+       "models/gemini-3.5-flash",       
+        "models/gemini-3.1-flash-lite",  
+        "models/gemini-2.5-flash",       
+        "models/gemini-2.5-pro",         
+        "models/gemini-2.5-flash-lite"
     ]
     
     generation_config = {"temperature": 0.1, "top_p": 0.95, "top_k": 40, "max_output_tokens": 8192}
