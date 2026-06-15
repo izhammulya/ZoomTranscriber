@@ -1,4 +1,3 @@
-
 import streamlit as st
 import re
 import time
@@ -386,5 +385,3 @@ with col_right:
             
             with st.container(border=True):
                 st.markdown(st.session_state.ai_repaired)
-
-```
