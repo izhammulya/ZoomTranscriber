@@ -1,12 +1,4 @@
-Pilihan yang sangat rasional. Streamlit memang jauh lebih tangguh ( *robust* ) untuk menangani beban pemrosesan *backend* berbasis Python, tidak memiliki masalah *timeout* browser sekeras Node.js/Express, dan otomatis menyimpan status (*state*) dokumen dengan sangat baik.
 
-Sesuai dengan instruksi Anda, **seluruh antarmuka, tata letak grid (1/3 kiri, 2/3 kanan), teks label, dan *wording prompt* khas Pelindo dipertahankan 100%**.
-
-Saya telah memigrasikan logika *Smart Fallback* Node.js Anda ke dalam Python, dan menyertakan fungsi generator MS Word *native* (yang mendeteksi tabel Markdown) agar hasil unduhannya sangat rapi. *(Catatan teknis: Fungsi ekspor PDF saya ubah menjadi ekspor TXT, karena pembuatan PDF native di Streamlit Cloud sering bermasalah karena ketiadaan library sistem operasi, sementara Word adalah standar korporat).*
-
-Berikut adalah **Full Code `app.py**` untuk Streamlit Anda.
-
-```python
 import streamlit as st
 import re
 import time
