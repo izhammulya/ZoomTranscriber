@@ -84,16 +84,19 @@ def create_word_document(content):
 import markdown
 from fpdf import FPDF 
 
-# --- GANTI BAGIAN INI DI KODE ANDA ---
-
 class PDF(FPDF):
     def header(self):
-        self.set_font("helvetica", "B", 15)
-        self.cell(0, 10, "Notulen Rapat", align="C")
-        self.ln(10)
+        self.set_font('Arial', 'B', 15)
+        self.cell(0, 10, 'Notulen Rapat', 0, 1, 'C')
+        self.ln(5)
 
 def create_pdf_document(content):
-    # 1. Normalisasi karakter khusus Unicode agar tidak error
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=11)
+    
+    # --- NORMALISASI UNICODE SANGAT KETAT UNTUK FPDF ---
+    # Mengganti karakter khusus AI menjadi karakter Latin-1 standar
     replacements = {
         '“': '"', '”': '"', '‘': "'", '’': "'",
         '–': '-', '—': '-', '•': '-', '…': '...',
@@ -102,22 +105,29 @@ def create_pdf_document(content):
     for k, v in replacements.items():
         content = content.replace(k, v)
         
-    # 2. Konversi Markdown mentah ke HTML (termasuk mengonversi tabel)
-    html_string = markdown.markdown(content, extensions=['tables'])
+    # Paksa buang sisa Unicode aneh yang tidak terdeteksi (diubah jadi '?')
+    content = content.encode('latin-1', 'replace').decode('latin-1')
     
-    # 3. Paksa tabel HTML untuk memiliki garis pembatas (border solid)
-    html_string = html_string.replace('<table>', '<table border="1" width="100%">')
-    
-    # 4. Render ke dalam dokumen PDF
-    pdf = PDF()
-    pdf.add_page()
-    pdf.set_font("helvetica", size=11)
-    
-    # Keajaiban fpdf2: Tulis HTML langsung menjadi elemen PDF (Tabel, Bold, List)
-    pdf.write_html(html_string)
-    
-    # Keluarkan sebagai tipe bytearray yang siap diunduh Streamlit
-    return bytes(pdf.output())
+    lines = content.split('\n')
+    for line in lines:
+        line_strip = line.strip()
+        # Bersihkan elemen HTML & Markdown statis
+        clean_line = line_strip.replace('<br>', '\n').replace('<br/>', '\n').replace('**', '')
+        
+        if clean_line.startswith('|') and clean_line.endswith('|'):
+            if re.match(r'^\|[-\s|]+\|$', clean_line):
+                continue
+            cells = [cell.strip() for cell in clean_line.strip('|').split('|')]
+            text = " | ".join(cells)
+            pdf.multi_cell(0, 8, txt=text)
+        elif clean_line.startswith('#') and clean_line != "# Notulen Rapat":
+            pdf.set_font("Arial", 'B', 12)
+            pdf.multi_cell(0, 10, txt=clean_line.replace('#', '').strip())
+            pdf.set_font("Arial", size=11)
+        elif clean_line and clean_line != "? Notulen Rapat" and clean_line != "# Notulen Rapat":
+            pdf.multi_cell(0, 8, txt=clean_line)
+            
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 
 # ==============================================================================
