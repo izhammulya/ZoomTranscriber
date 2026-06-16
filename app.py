@@ -6,6 +6,7 @@ import google.generativeai as genai
 from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from fpdf import FPDF
 
 # ==============================================================================
 # SECTION 1: DATA PROCESSING & EXPORT TOOLS
@@ -45,7 +46,9 @@ def create_word_document(content):
                 table.style = 'Table Grid'
                 for i, row in enumerate(table_data):
                     for j in range(min(len(table_data[0]), len(row))):
-                        table.cell(i, j).text = row[j]
+                        # Konversi <br> ke newline asli MS Word
+                        clean_text = row[j].replace('<br>', '\n').replace('<br/>', '\n')
+                        table.cell(i, j).text = clean_text
                 in_table = False
                 table_data = []
                 doc.add_paragraph()
@@ -70,12 +73,48 @@ def create_word_document(content):
         table.style = 'Table Grid'
         for i, row in enumerate(table_data):
             for j in range(min(len(table_data[0]), len(row))):
-                table.cell(i, j).text = row[j]
+                clean_text = row[j].replace('<br>', '\n').replace('<br/>', '\n')
+                table.cell(i, j).text = clean_text
 
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
     return buffer
+
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 15)
+        self.cell(0, 10, 'Notulen Rapat', 0, 1, 'C')
+        self.ln(5)
+
+def create_pdf_document(content):
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=11)
+    
+    # Normalisasi karakter khusus agar kompatibel dengan latin-1 FPDF
+    content = content.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'").replace('–', '-')
+    
+    lines = content.split('\n')
+    for line in lines:
+        line_strip = line.strip()
+        # Bersihkan elemen HTML & Markdown statis untuk PDF
+        clean_line = line_strip.replace('<br>', '\n').replace('<br/>', '\n').replace('**', '')
+        
+        if clean_line.startswith('|') and clean_line.endswith('|'):
+            if re.match(r'^\|[-\s|]+\|$', clean_line):
+                continue
+            cells = [cell.strip() for cell in clean_line.strip('|').split('|')]
+            text = " | ".join(cells)
+            pdf.multi_cell(0, 8, txt=text)
+        elif clean_line.startswith('#') and clean_line != "# Notulen Rapat":
+            pdf.set_font("Arial", 'B', 12)
+            pdf.multi_cell(0, 10, txt=clean_line.replace('#', '').strip())
+            pdf.set_font("Arial", size=11)
+        elif clean_line and clean_line != "# Notulen Rapat":
+            pdf.multi_cell(0, 8, txt=clean_line)
+            
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 # ==============================================================================
 # SECTION 2: AI CORE ENGINE (SMART FALLBACK)
@@ -84,7 +123,6 @@ def create_word_document(content):
 def generate_with_fallback(prompt_text, api_key):
     genai.configure(api_key=api_key)
     
-    # Prefix "models/" wajib ada pada SDK Python
     FALLBACK_MODELS = [
        "models/gemini-3.5-flash",       
         "models/gemini-3.1-flash-lite",  
@@ -111,7 +149,6 @@ def generate_with_fallback(prompt_text, api_key):
                 safety_settings=safety_settings
             )
             
-            # Deteksi output terpotong
             if response.candidates and response.candidates[0].finish_reason.name == 'MAX_TOKENS':
                 raise Exception("MAX_TOKENS_REACHED")
                 
@@ -124,11 +161,11 @@ def generate_with_fallback(prompt_text, api_key):
             
             if i < len(FALLBACK_MODELS) - 1:
                 if '429' in err_str or 'quota' in err_str or 'exhausted' in err_str:
-                    time.sleep(2.5) # Delay 2.5 detik sesuai logika awal
+                    time.sleep(2.5) 
                 elif '404' in err_str or 'not found' in err_str:
-                    pass # Langsung lompat jika model tidak tersedia
+                    pass 
                 elif 'max_tokens' in err_str:
-                    pass # Lompat ke model dengan kapasitas lebih besar
+                    pass 
     
     return {"success": False, "error": f"Semua model gagal merespon. Error: {last_error}"}
 
@@ -138,12 +175,10 @@ def generate_with_fallback(prompt_text, api_key):
 
 st.set_page_config(page_title="MNEV Intelligence | Notulen Generator", page_icon="📝", layout="wide")
 
-# Custom CSS mereplikasi Tailwind UI
 st.markdown("""
 <style>
     .stApp { background-color: #faf9f6; font-family: 'Inter', sans-serif; color: #292524; }
     
-    /* Header Custom */
     .mnev-header {
         background: white; border-bottom: 1px solid #e5e7eb; padding: 1rem 2rem;
         display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;
@@ -154,13 +189,11 @@ st.markdown("""
     .mnev-subtitle { font-size: 0.7rem; color: #78716c; margin: 0; letter-spacing: 0.05em; font-weight: 500;}
     .mnev-badge { background: #f5f5f4; border: 1px solid #e7e5e4; padding: 2px 6px; border-radius: 4px; font-size: 0.6rem; color: #57534e; font-family: sans-serif;}
     
-    /* Tombol Khusus MNEV (#596248) */
     div.stButton > button:first-child {
         background-color: #596248; color: white; width: 100%; border-radius: 8px; border: none; font-weight: 500; padding: 0.75rem; transition: all 0.2s;
     }
     div.stButton > button:first-child:hover { background-color: #4a523b; }
     
-    /* Container Box */
     .custom-box { background: white; padding: 1.5rem; border-radius: 1rem; box-shadow: 0 2px 10px -3px rgba(0,0,0,0.05); border: 1px solid #e7e5e4; }
 </style>
 
@@ -175,7 +208,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# State Management
 if "transcript_text" not in st.session_state: st.session_state.transcript_text = ""
 if "ai_notulen" not in st.session_state: st.session_state.ai_notulen = ""
 if "ai_repaired" not in st.session_state: st.session_state.ai_repaired = ""
@@ -186,7 +218,6 @@ try:
 except:
     api_key = None
 
-# Tata Letak Grid (1/3 Kiri, 2/3 Kanan)
 col_left, col_right = st.columns([4, 8], gap="large")
 
 with col_left:
@@ -281,17 +312,18 @@ with col_right:
     
     with tab1:
         if st.session_state.ai_notulen:
-            # Tombol Download
             c1, c2, c3 = st.columns([2, 2, 6])
             with c1:
                 word_buffer = create_word_document(st.session_state.ai_notulen)
                 st.download_button("📄 Unduh Word (.docx)", word_buffer.getvalue(), "Notulen_Rapat.docx", use_container_width=True)
             with c2:
-                st.download_button("📝 Unduh TXT", st.session_state.ai_notulen, "Notulen_Rapat.txt", use_container_width=True)
+                pdf_bytes = create_pdf_document(st.session_state.ai_notulen)
+                st.download_button("📕 Unduh PDF", pdf_bytes, "Notulen_Rapat.pdf", mime="application/pdf", use_container_width=True)
             
             st.divider()
             with st.container(border=True):
-                st.markdown(st.session_state.ai_notulen)
+                # Memastikan <br> dirender sebagai baris baru
+                st.markdown(st.session_state.ai_notulen, unsafe_allow_html=True)
         else:
             st.info("Belum Ada Data Transkrip. Hasil AI Notulen akan muncul di sini.")
 
@@ -301,19 +333,19 @@ with col_right:
         else:
             for msg in st.session_state.chat_history:
                 with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+                    st.markdown(msg["content"], unsafe_allow_html=True)
             
             if u_input := st.chat_input("Tanyakan spesifik terkait transkrip..."):
                 st.session_state.chat_history.append({"role": "user", "content": u_input})
                 with st.chat_message("user"):
-                    st.markdown(u_input)
+                    st.markdown(u_input, unsafe_allow_html=True)
                 
                 with st.chat_message("assistant"):
                     with st.spinner("Mengetik..."):
                         context = f"TRANSKRIP REFERENSI:\n{st.session_state.transcript_text}\n\nPERTANYAAN: {u_input}\n\nINSTRUKSI: Jawablah hanya berdasarkan transkrip di atas dengan bahasa Indonesia formal."
                         chat_res = generate_with_fallback(context, api_key)
                         if chat_res['success']:
-                            st.markdown(chat_res['content'])
+                            st.markdown(chat_res['content'], unsafe_allow_html=True)
                             st.session_state.chat_history.append({"role": "assistant", "content": chat_res['content']})
                         else:
                             st.error(chat_res['error'])
@@ -382,7 +414,10 @@ with col_right:
                 r_word_buffer = create_word_document(st.session_state.ai_repaired)
                 st.download_button("📄 Unduh Word", r_word_buffer.getvalue(), "Reparasi_Notulen.docx", key="dl_rep_word", use_container_width=True)
             with rc2:
-                st.download_button("📝 Unduh TXT", st.session_state.ai_repaired, "Reparasi_Notulen.txt", key="dl_rep_txt", use_container_width=True)
+                r_pdf_bytes = create_pdf_document(st.session_state.ai_repaired)
+                st.download_button("📕 Unduh PDF", r_pdf_bytes, "Reparasi_Notulen.pdf", mime="application/pdf", key="dl_rep_pdf", use_container_width=True)
             
             with st.container(border=True):
-                st.markdown(st.session_state.ai_repaired)
+                # Memastikan <br> dirender sebagai baris baru
+                st.markdown(st.session_state.ai_repaired, unsafe_allow_html=True)
+                
