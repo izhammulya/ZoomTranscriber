@@ -92,13 +92,23 @@ def create_pdf_document(content):
     pdf.add_page()
     pdf.set_font("Arial", size=11)
     
-    # Normalisasi karakter khusus agar kompatibel dengan latin-1 FPDF
-    content = content.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'").replace('–', '-')
+    # --- NORMALISASI UNICODE SANGAT KETAT UNTUK FPDF ---
+    # Mengganti karakter khusus AI menjadi karakter Latin-1 standar
+    replacements = {
+        '“': '"', '”': '"', '‘': "'", '’': "'",
+        '–': '-', '—': '-', '•': '-', '…': '...',
+        '\u200b': '', '\xa0': ' '
+    }
+    for k, v in replacements.items():
+        content = content.replace(k, v)
+        
+    # Paksa buang sisa Unicode aneh yang tidak terdeteksi (diubah jadi '?')
+    content = content.encode('latin-1', 'replace').decode('latin-1')
     
     lines = content.split('\n')
     for line in lines:
         line_strip = line.strip()
-        # Bersihkan elemen HTML & Markdown statis untuk PDF
+        # Bersihkan elemen HTML & Markdown statis
         clean_line = line_strip.replace('<br>', '\n').replace('<br/>', '\n').replace('**', '')
         
         if clean_line.startswith('|') and clean_line.endswith('|'):
@@ -111,11 +121,10 @@ def create_pdf_document(content):
             pdf.set_font("Arial", 'B', 12)
             pdf.multi_cell(0, 10, txt=clean_line.replace('#', '').strip())
             pdf.set_font("Arial", size=11)
-        elif clean_line and clean_line != "# Notulen Rapat":
+        elif clean_line and clean_line != "? Notulen Rapat" and clean_line != "# Notulen Rapat":
             pdf.multi_cell(0, 8, txt=clean_line)
             
     return pdf.output(dest='S').encode('latin-1', 'replace')
-
 # ==============================================================================
 # SECTION 2: AI CORE ENGINE (SMART FALLBACK)
 # ==============================================================================
